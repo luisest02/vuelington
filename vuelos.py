@@ -49,16 +49,17 @@ nombres_aerolineas = {
     "LX": "Swiss", "AZ": "ITA Airways", "KL": "KLM", "D8": "Norwegian"
 }
 
+# 🌍 DICCIONARIO ACTUALIZADO (SIN ESPAÑA/PORTUGAL)
 aeropuertos_europa = {
-    "🇬🇧 Reino Unido": {"Londres": "LON", "Mánchester": "MAN", "Edimburgo": "EDI"},
+    "🇷🇴 Rumanía / 🇦🇱 Albania": {"Bucarest": "OTP", "Cluj-Napoca": "CLJ", "Tirana": "TIA"},
+    "🇭🇷 Croacia / 🇧🇬 Bulgaria": {"Zagreb": "ZAG", "Dubrovnik": "DBV", "Sofía": "SOF"},
+    "🇵🇱 Polonia / 🇭🇺 Hungría": {"Cracovia": "KRK", "Varsovia": "WAW", "Budapest": "BUD", "Praga": "PRG"},
+    "🇮🇹 Italia": {"Roma": "ROM", "Milán": "MIL", "Venecia": "VCE", "Nápoles": "NAP", "Bolonia": "BLQ"},
+    "🇬🇧 UK / 🇮🇪 Irlanda": {"Londres": "LON", "Dublín": "DUB", "Edimburgo": "EDI"},
     "🇫🇷 Francia": {"París": "PAR", "Niza": "NCE", "Lyon": "LYS"},
-    "🇮🇹 Italia": {"Roma": "ROM", "Milán": "MIL", "Venecia": "VCE", "Nápoles": "NAP"},
     "🇩🇪 Alemania": {"Berlín": "BER", "Múnich": "MUC", "Frankfurt": "FRA"},
-    "🇪🇸 España": {"Mallorca": "PMI", "Ibiza": "IBZ", "Tenerife": "TCI", "Gran Canaria": "LPA"},
-    "🇵🇹 Portugal": {"Lisboa": "LIS", "Oporto": "OPO", "Faro": "FAO"},
     "🇳🇱 Benelux": {"Ámsterdam": "AMS", "Bruselas": "BRU"},
-    "🇪🇺 Este": {"Praga": "PRG", "Budapest": "BUD", "Varsovia": "WAW"},
-    "❄️ Nórdicos": {"Copenhague": "CPH", "Estocolmo": "STO", "Oslo": "OSL"}
+    "☀️ Malta": {"Malta": "MLA"}
 }
 
 catalogo_limpio = {}
@@ -108,12 +109,11 @@ with st.sidebar:
     f_ini = st.date_input("Inicio", datetime.now())
     semanas = st.slider("Semanas a mirar", 1, 8, 4)
     
-    # NUEVO SELECTOR DE TIPO DE VIAJE
+    # SELECTOR DE TIPO DE VIAJE
     tipo_viaje = st.radio("Tipo de Escapada", ["Viernes - Domingo (2 noches)", "Sábado - Domingo (1 noche)"])
     
     st.divider()
     st.subheader("⏰ Horarios")
-    # Ajustamos el texto según lo elegido
     txt_ida = "Salida Viernes >" if "Viernes" in tipo_viaje else "Salida Sábado >"
     
     h_ida_min = st.slider(txt_ida, 0, 23, 8 if "Sábado" in tipo_viaje else 15, format="%dh")
