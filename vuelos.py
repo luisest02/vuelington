@@ -6,18 +6,46 @@ import requests
 import os
 
 st.set_page_config(page_title="VUELINTON", page_icon="✈️", layout="wide")
-
-# --- SEGURIDAD ---
+# ==========================================
+# 🔐 SEGURIDAD: PANTALLA DE LOGIN
+# ==========================================
 def check_password():
-    if "PASSWORD_APP" not in st.secrets: return True
-    clave = st.sidebar.text_input("🔒 Contraseña", type="password")
-    if clave != st.secrets["PASSWORD_APP"]:
-        st.sidebar.error("Acceso Bloqueado")
-        st.stop()
-    return True
+    # 1. Si la clave no está configurada en Secrets, dejamos pasar (modo desarrollo)
+    if "PASSWORD_APP" not in st.secrets:
+        return True
 
+    # 2. Inicializamos el estado de "autenticado" si no existe
+    if 'authenticated' not in st.session_state:
+        st.session_state.authenticated = False
+
+    # 3. Si YA está autenticado, dejamos pasar y la función termina aquí
+    if st.session_state.authenticated:
+        return True
+
+    # 4. Si NO está autenticado, mostramos el Login en el centro
+    col1, col2, col3 = st.columns([1, 2, 1]) # Centramos el contenido
+    with col2:
+        st.markdown("## ✈️ VUELINGTON")
+        st.info("🔒 Esta aplicación está protegida.")
+        
+        # Usamos un formulario para poder dar a "Enter"
+        with st.form("login_form"):
+            clave_input = st.text_input("Contraseña", type="password")
+            submit = st.form_submit_button("Entrar")
+            
+            if submit:
+                if clave_input == st.secrets["PASSWORD_APP"]:
+                    # ¡ÉXITO! Guardamos en memoria que ya ha entrado
+                    st.session_state.authenticated = True
+                    st.rerun() # Recargamos la página para que desaparezca el login
+                else:
+                    st.error("❌ Contraseña incorrecta")
+
+    # 5. Paramos la ejecución. Nada debajo de esto se cargará hasta que se loguee.
+    st.stop()
+
+# Ejecutamos el portero antes de cargar nada más
 check_password()
-
 # --- CARGA CLAVES ---
 try:
     API_KEY = st.secrets["AMADEUS_API_KEY"]
