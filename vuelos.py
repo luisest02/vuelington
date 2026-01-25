@@ -97,9 +97,13 @@ def buscar_vuelos_api(origen, destino, f1, f2):
                     'h_vuelta': itin[1]['segments'][0]['departure']['at'].split('T')[1][:5]
                 })
         return out
-    except ResponseError as e: return "RATE_LIMIT" if e.response.statusCode==429 else []
-    except: return []
-
+    except ResponseError as e:
+        # CORRECCIÓN AQUÍ: status_code (con guion bajo)
+        if e.response and e.response.status_code == 429:
+            return "RATE_LIMIT"
+        return []
+    except Exception:
+        return []
 def link_skyscanner(destino, f1, f2):
     return f"https://www.skyscanner.es/transport/flights/mad/{destino.lower()}/{f1[2:].replace('-','')}/{f2[2:].replace('-','')}/"
 
