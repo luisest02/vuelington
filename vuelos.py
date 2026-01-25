@@ -34,6 +34,7 @@ def enviar_a_telegram(texto):
         st.error("⚠️ Faltan secretos Telegram.")
         return
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+    # parse_mode='Markdown' activado para links
     payload = {"chat_id": TG_ID, "text": texto, "parse_mode": "Markdown"}
     try:
         requests.post(url, data=payload)
@@ -76,7 +77,7 @@ for region, ciudades in aeropuertos_europa.items():
 @st.cache_data(ttl=3600, show_spinner=False)
 def buscar_vuelos_api(origen, destino, f1, f2):
     try:
-        # CAMBIA 'test' A 'production' CUANDO TENGAS CLAVES
+        # ⚠️ CAMBIA 'test' A 'production' CUANDO TENGAS CLAVES REALES
         amadeus = Client(client_id=API_KEY, client_secret=API_SECRET, hostname='test')
         res = amadeus.shopping.flight_offers_search.get(
             originLocationCode=origen, destinationLocationCode=destino,
@@ -99,7 +100,11 @@ def buscar_vuelos_api(origen, destino, f1, f2):
     except: return []
 
 def link_skyscanner(destino, f1, f2):
-    return f"https://www.skyscanner.es/transport/flights/mad/{destino.lower()}/{f1[2:].replace('-','')}/{f2[2:].replace('-','')}/"
+    # f1 y f2 vienen como YYYY-MM-DD
+    # Skyscanner espera AAMMDD
+    d_ida = f1[2:].replace('-', '')
+    d_vuelta = f2[2:].replace('-', '')
+    return f"https://www.skyscanner.es/transport/flights/mad/{destino.lower()}/{d_ida}/{d_vuelta}/"
 
 # --- INTERFAZ ---
 st.title("🚀 VUELINTON")
@@ -196,10 +201,13 @@ if st.session_state.get('busqueda_activa') and destinos:
                             st.caption(f"{top['h_ida']} - {top['h_vuelta']}")
                             
                             c1, c2 = st.columns(2)
+                            url_sky = link_skyscanner(code, fi_s, fv_s)
+                            
                             with c1:
-                                st.link_button("✈️", link_skyscanner(code, fi_s, fv_s))
+                                st.link_button("✈️", url_sky)
                             with c2:
-                                msg_tg = f"🔥 **MANUAL ({tag})**\n✈️ Madrid -> {ciu}\n💰 **{top['precio']}€**\n📅 {fi.strftime('%d/%m')} - {fv.strftime('%d/%m')}\n🕓 {top['h_ida']} - {top['h_vuelta']}"
+                                # MODIFICADO: Mensaje Telegram con link oculto en el nombre
+                                msg_tg = f"🔥 **MANUAL ({tag})**\n✈️ Madrid -> [{ciu}]({url_sky})\n💰 **{top['precio']}€**\n📅 {fi.strftime('%d/%m')} - {fv.strftime('%d/%m')}\n🕓 {top['h_ida']} - {top['h_vuelta']}"
                                 if st.button("📱", key=f"tg_{ciu}_{fi_s}"):
                                     enviar_a_telegram(msg_tg)
                         idx+=1
