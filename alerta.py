@@ -20,44 +20,26 @@ PRECIO_CHOLLO = 160
 MESES_VISTA = 2 # Mantenemos 2 meses para permitir la doble búsqueda sin coste extra
 SEMANAS_A_MIRAR = MESES_VISTA * 4 
 
-# 🌍 LISTA "EUROTRIP BALCANES & ESTE" (Top 21)
-DESTINOS = [
-    # 💎 LA NUEVA OLA (Albania, Rumanía, Croacia) - Muy baratos y de moda
-    "TIA", # Tirana (Albania) - La joya de moda
-    "OTP", # Bucarest (Rumanía) - Vida nocturna top
-    "CLJ", # Cluj-Napoca (Rumanía) - Ciudad universitaria y de festivales
-    "ZAG", # Zagreb (Croacia) - Capital preciosa y económica
-    "SOF", # Sofía (Bulgaria) - De lo más barato de Europa
+# 🌍 DICCIONARIO DE CIUDADES (Para mostrar nombres bonitos)
+NOMBRES_CIUDADES = {
+    "TIA": "Tirana", "OTP": "Bucarest", "CLJ": "Cluj", "ZAG": "Zagreb", 
+    "SOF": "Sofía", "KRK": "Cracovia", "WAW": "Varsovia", "BUD": "Budapest",
+    "PRG": "Praga", "BER": "Berlín", "AMS": "Ámsterdam", "DUB": "Dublín",
+    "BRU": "Bruselas", "MLA": "Malta", "ROM": "Roma", "MIL": "Milán",
+    "VCE": "Venecia", "NAP": "Nápoles", "BLQ": "Bolonia", "LON": "Londres", 
+    "PAR": "París"
+}
 
-    # 🍻 POLONIA & HUNGRÍA (Fiesta asegurada)
-    "KRK", # Cracovia (Imprescindible con amigos)
-    "WAW", # Varsovia (Mezcla historia y rascacielos)
-    "BUD", # Budapest (Termas y Ruin Bars)
-    "PRG", # Praga (Cerveza y vistas)
-
-    # 🏛️ CLÁSICOS & FIESTA
-    "BER", # Berlín (Techno)
-    "AMS", # Ámsterdam (Canales)
-    "DUB", # Dublín (Pubs)
-    "BRU", # Bruselas (Cerveza fuerte)
-    "MLA", # Malta (Sol y fiesta mediterránea)
-
-    # 🍕 ITALIA (Siempre renta)
-    "ROM", # Roma
-    "MIL", # Milán
-    "VCE", # Venecia
-    "NAP", # Nápoles (Caos divertido)
-    "BLQ", # Bolonia (Ambiente universitario)
-
-    # 🎩 LOS GRANDES
-    "LON", # Londres
-    "PAR"  # París
-]
+# Lista de códigos para la búsqueda (extraída del diccionario)
+DESTINOS = list(NOMBRES_CIUDADES.keys())
 
 def enviar_telegram(msg):
+    # Cortamos si excede el límite de Telegram
     if len(msg) > 4000:
         msg = msg[:4000] + "\n...(cortado por longitud)"
+    
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+    # Importante: parse_mode='Markdown' permite los enlaces [Texto](URL)
     requests.post(url, data={"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "Markdown"})
 
 # --- LÓGICA PRINCIPAL ---
@@ -66,7 +48,7 @@ try:
         print("⏳ Claves PENDIENTE.")
         exit()
 
-    # CAMBIA 'test' POR 'production' CUANDO TENGAS LAS CLAVES REALES
+    # ⚠️ IMPORTANTE: CAMBIA 'test' POR 'production' CUANDO TENGAS LAS CLAVES REALES
     amadeus = Client(client_id=API_KEY, client_secret=API_SECRET, hostname='test')
     
     ranking_global = []
@@ -128,7 +110,7 @@ try:
                     # Si es la opción Sábado-Domingo, exigimos volver tarde (>15:00)
                     if opcion["tag"] == "S-D" and h_regreso < 15: continue
                     
-                    # Preparar datos
+                    # Preparar datos visuales
                     h_ida_str = segs_ida[0]['departure']['at'].split('T')[1][:5]
                     h_vuelta_str = segs_vuelta[0]['departure']['at'].split('T')[1][:5]
                     aerolinea = segs_ida[0]['carrierCode']
@@ -136,9 +118,18 @@ try:
                     icono = "⚡" if opcion["tag"] == "S-D" else "📅" 
                     fecha_bonita = f"{opcion['ida'][8:]}/{opcion['ida'][5:7]}"
 
+                    # --- GENERACIÓN DE LINK SKYSCANNER ---
+                    # Formato URL: AAMMDD (ej: 231027)
+                    sky_ida = opcion["ida"][2:].replace("-", "")
+                    sky_vuelta = opcion["vuelta"][2:].replace("-", "")
+                    url_sky = f"https://www.skyscanner.es/transport/flights/mad/{codigo.lower()}/{sky_ida}/{sky_vuelta}/"
+                    
+                    nombre_ciudad = NOMBRES_CIUDADES.get(codigo, codigo)
+
                     ranking_global.append({
                         'precio': precio,
-                        'linea': f"{icono} {codigo} ({fecha_bonita}): **{precio}€** | {opcion['tag']} {h_ida_str}-{h_vuelta_str} ({aerolinea})"
+                        # Usamos Markdown para ocultar el link en el nombre de la ciudad
+                        'linea': f"{icono} [{nombre_ciudad}]({url_sky}) ({fecha_bonita}): **{precio}€** | {opcion['tag']} {h_ida_str}-{h_vuelta_str} ({aerolinea})"
                     })
                     
                 except Exception:
