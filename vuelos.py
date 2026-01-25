@@ -104,7 +104,7 @@ def link_skyscanner(destino, f1, f2):
     return f"https://www.skyscanner.es/transport/flights/mad/{destino.lower()}/{f1[2:].replace('-','')}/{f2[2:].replace('-','')}/"
 
 # --- INTERFAZ ---
-st.title("🚀 EuroTrip Pro")
+st.title("🚀 VUELINTON")
 
 with st.sidebar:
     st.divider()
