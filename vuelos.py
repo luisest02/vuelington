@@ -2,55 +2,53 @@ import streamlit as st
 from amadeus import Client, ResponseError
 from datetime import datetime, timedelta
 import time
+import requests # <--- NECESARIO PARA TELEGRAM
 import os
 
-# --- CONFIGURACIÓN DE LA PÁGINA ---
+# --- CONFIGURACIÓN ---
 st.set_page_config(page_title="EuroTrip Pro", page_icon="✈️", layout="wide")
 
 # ==========================================
-# 🔐 SISTEMA DE SEGURIDAD (PORTERO DIGITAL)
+# 🔐 SEGURIDAD: PORTERO Y CREDENCIALES
 # ==========================================
 def check_password():
-    """Devuelve True si el usuario pone la contraseña correcta."""
-    
-    # Si no hay contraseña configurada en Secrets, dejamos pasar (Modo Inseguro)
-    if "PASSWORD_APP" not in st.secrets:
-        st.error("⚠️ Faltan configurar la contraseña en Secrets.")
-        return False
+    if "PASSWORD_APP" not in st.secrets: return True # Si no hay clave configurada, pasa (modo dev)
+    clave = st.sidebar.text_input("🔒 Contraseña", type="password")
+    if clave != st.secrets["PASSWORD_APP"]:
+        st.sidebar.error("Acceso Bloqueado")
+        st.stop()
+    return True
 
-    clave_secreta = st.secrets["PASSWORD_APP"]
+check_password() # Ejecutamos el portero
 
-    # Cuadro para meter la contraseña
-    password_input = st.sidebar.text_input("🔒 Contraseña de Acceso", type="password")
-    
-    if password_input == clave_secreta:
-        return True
-    elif password_input == "":
-        st.sidebar.warning("Introduce la contraseña.")
-        return False
-    else:
-        st.sidebar.error("❌ Contraseña incorrecta")
-        return False
-
-# 🛑 SI LA CONTRASEÑA NO ES CORRECTA, PARAMOS TODO AQUÍ
-if not check_password():
-    st.title("🔒 Acceso Restringido")
-    st.write("Por favor, introduce la contraseña en la barra lateral para usar EuroTrip Pro.")
-    st.stop() # Detiene la ejecución del resto del código
-
-# ==========================================
-# 🚀 A PARTIR DE AQUÍ, SOLO ENTRA QUIEN SEPA LA CLAVE
-# ==========================================
-
-# --- GESTIÓN DE CREDENCIALES ---
+# Cargar Claves
 try:
     API_KEY = st.secrets["AMADEUS_API_KEY"]
     API_SECRET = st.secrets["AMADEUS_API_SECRET"]
-except FileNotFoundError:
-    st.error("⚠️ Error: No se encontraron las claves API.")
+    # Intentamos cargar Telegram (Opcional, para que no falle si no los has puesto aún)
+    TG_TOKEN = st.secrets.get("TELEGRAM_TOKEN", None)
+    TG_ID = st.secrets.get("TELEGRAM_CHAT_ID", None)
+except:
+    st.error("Faltan secretos de configuración.")
     st.stop()
 
-# --- DICCIONARIO AEROLÍNEAS ---
+# ==========================================
+# 📨 FUNCIÓN ENVIAR A TELEGRAM
+# ==========================================
+def enviar_a_telegram(texto):
+    if not TG_TOKEN or not TG_ID:
+        st.toast("⚠️ Configura los secretos de Telegram para usar esta función.", icon="⚠️")
+        return
+    
+    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+    payload = {"chat_id": TG_ID, "text": texto, "parse_mode": "Markdown"}
+    try:
+        requests.post(url, data=payload)
+        st.toast("✅ ¡Enviado a tu móvil!", icon="🚀")
+    except:
+        st.toast("❌ Error al enviar.", icon="🔥")
+
+# ... (DICCIONARIOS Y FUNCIONES AUXILIARES IGUAL QUE ANTES) ...
 nombres_aerolineas = {
     "FR": "Ryanair", "U2": "EasyJet", "IB": "Iberia", "UX": "Air Europa",
     "VY": "Vueling", "HV": "Transavia", "W6": "Wizz Air", "LH": "Lufthansa",
@@ -58,152 +56,122 @@ nombres_aerolineas = {
     "LX": "Swiss", "AZ": "ITA Airways", "KL": "KLM", "D8": "Norwegian"
 }
 
-# --- BASE DE DATOS AEROPUERTOS ---
 aeropuertos_europa = {
-    "🇬🇧 Reino Unido": {"Londres": "LON", "Mánchester": "MAN", "Edimburgo": "EDI", "Bristol": "BRS"},
-    "🇫🇷 Francia": {"París": "PAR", "Niza": "NCE", "Lyon": "LYS", "Burdeos": "BOD"},
-    "🇮🇹 Italia": {"Roma": "ROM", "Milán": "MIL", "Venecia": "VCE", "Nápoles": "NAP", "Bolonia": "BLQ"},
-    "🇩🇪 Alemania": {"Berlín": "BER", "Múnich": "MUC", "Frankfurt": "FRA", "Hamburgo": "HAM"},
+    "🇬🇧 Reino Unido": {"Londres": "LON", "Mánchester": "MAN", "Edimburgo": "EDI"},
+    "🇫🇷 Francia": {"París": "PAR", "Niza": "NCE", "Lyon": "LYS"},
+    "🇮🇹 Italia": {"Roma": "ROM", "Milán": "MIL", "Venecia": "VCE", "Nápoles": "NAP"},
+    "🇩🇪 Alemania": {"Berlín": "BER", "Múnich": "MUC", "Frankfurt": "FRA"},
     "🇪🇸 España": {"Mallorca": "PMI", "Ibiza": "IBZ", "Tenerife": "TCI", "Gran Canaria": "LPA"},
-    "🇵🇹 Portugal": {"Lisboa": "LIS", "Oporto": "OPO", "Faro": "FAO", "Madeira": "FNC"},
-    "🇳🇱 Benelux": {"Ámsterdam": "AMS", "Bruselas": "BRU", "Eindhoven": "EIN"},
-    "🇪🇺 Este": {"Praga": "PRG", "Budapest": "BUD", "Varsovia": "WAW", "Cracovia": "KRK"},
+    "🇵🇹 Portugal": {"Lisboa": "LIS", "Oporto": "OPO", "Faro": "FAO"},
+    "🇳🇱 Benelux": {"Ámsterdam": "AMS", "Bruselas": "BRU"},
+    "🇪🇺 Este": {"Praga": "PRG", "Budapest": "BUD", "Varsovia": "WAW"},
     "❄️ Nórdicos": {"Copenhague": "CPH", "Estocolmo": "STO", "Oslo": "OSL"}
 }
 
-# Procesar nombres
 catalogo_limpio = {}
 ciudades_por_region = {}
 for region, ciudades in aeropuertos_europa.items():
-    lista_temp = []
-    for nombre, codigo in ciudades.items():
-        nom = f"{region.split()[0]} {nombre}"
-        catalogo_limpio[nom] = codigo
-        lista_temp.append(nom)
-    ciudades_por_region[region] = lista_temp
+    l = []
+    for k, v in ciudades.items():
+        n = f"{region.split()[0]} {k}"
+        catalogo_limpio[n] = v
+        l.append(n)
+    ciudades_por_region[region] = l
 
-# --- FUNCIÓN DE CACHÉ ---
 @st.cache_data(ttl=3600, show_spinner=False)
-def buscar_vuelos_api(origen, destino_code, f_ida, f_vuelta):
+def buscar_vuelos_api(origen, destino, f1, f2):
     try:
         amadeus = Client(client_id=API_KEY, client_secret=API_SECRET, hostname='production')
-        response = amadeus.shopping.flight_offers_search.get(
-            originLocationCode=origen, destinationLocationCode=destino_code,
-            departureDate=f_ida, returnDate=f_vuelta,
-            adults=1, currencyCode='EUR', max=20 
-        )
-        limpios = []
-        for v in response.data:
+        res = amadeus.shopping.flight_offers_search.get(
+            originLocationCode=origen, destinationLocationCode=destino,
+            departureDate=f1, returnDate=f2, adults=1, currencyCode='EUR', max=15)
+        out = []
+        for v in res.data:
             itin = v['itineraries']
-            # Solo directos
-            if len(itin[0]['segments']) == 1 and len(itin[1]['segments']) == 1:
-                carrier = itin[0]['segments'][0]['carrierCode']
-                limpios.append({
+            if len(itin[0]['segments'])==1 and len(itin[1]['segments'])==1:
+                c = itin[0]['segments'][0]['carrierCode']
+                out.append({
                     'precio': float(v['price']['total']),
-                    'aerolinea': nombres_aerolineas.get(carrier, carrier),
-                    'salida_ida': itin[0]['segments'][0]['departure']['at'],
-                    'salida_vuelta': itin[1]['segments'][0]['departure']['at']
+                    'aerolinea': nombres_aerolineas.get(c, c),
+                    'h_ida': itin[0]['segments'][0]['departure']['at'].split('T')[1][:5],
+                    'h_vuelta': itin[1]['segments'][0]['departure']['at'].split('T')[1][:5]
                 })
-        return limpios
-    except ResponseError as e:
-        if e.response.statusCode == 429: return "RATE_LIMIT"
-        return []
+        return out
+    except ResponseError as e: return "RATE_LIMIT" if e.response.statusCode==429 else []
     except: return []
 
-def link_skyscanner(destino, f_ida, f_vuelta):
-    fi = f_ida[2:].replace("-", "")
-    fv = f_vuelta[2:].replace("-", "")
-    return f"https://www.skyscanner.es/transport/flights/mad/{destino.lower()}/{fi}/{fv}/"
+def link_skyscanner(destino, f1, f2):
+    return f"https://www.skyscanner.es/transport/flights/mad/{destino.lower()}/{f1[2:].replace('-','')}/{f2[2:].replace('-','')}/"
 
-# --- INTERFAZ PRINCIPAL ---
-st.title("🚀 EuroTrip Pro: Buscador Inteligente")
+# --- INTERFAZ ---
+st.title("🚀 EuroTrip Pro")
 
 with st.sidebar:
     st.divider()
-    st.header("⚙️ Configuración")
+    f_ini = st.date_input("Inicio", datetime.now())
+    semanas = st.slider("Semanas", 1, 8, 4)
+    dias = 2 if st.radio("Duración", ["2 días (V-D)", "1 día (V-S)"]) == "2 días (V-D)" else 1
+    presupuesto = st.number_input("Max €", 50, 2000, 150)
     
-    fecha_inicio = st.date_input("¿Desde cuándo?", datetime.now())
-    semanas = st.slider("Fines de semana a mirar", 1, 8, 4)
-    dias_estancia = 2 if st.radio("Duración", ["V-D (2 días)", "V-S (1 día)"]) == "V-D (2 días)" else 1
+    zona = st.selectbox("Zona", ["Todas"] + list(aeropuertos_europa.keys()))
+    ops = []
+    if zona == "Todas":
+        for l in ciudades_por_region.values(): ops.extend(l)
+        ops.sort()
+    else: ops = ciudades_por_region[zona]
     
-    h_ida = st.slider("Salida Viernes >", 0, 23, 15, format="%dh")
-    h_vuelta = st.slider("Regreso >", 0, 23, 16, format="%dh")
+    if zona != "Todas" and st.button("Seleccionar Todos"): st.session_state['dest'] = ops
+    destinos = st.multiselect("Destinos", ops, key='dest')
+    buscar = st.button("🔎 BUSCAR", type="primary")
 
-    # Selector de Destinos
-    filtro = st.selectbox("Zona", ["Todas"] + list(aeropuertos_europa.keys()))
-    opciones = []
-    if filtro == "Todas":
-        for l in ciudades_por_region.values(): opciones.extend(l)
-        opciones.sort()
-    else:
-        opciones = ciudades_por_region[filtro]
+if buscar and destinos:
+    dia_v = (4 - f_ini.weekday() + 7) % 7
+    if dia_v == 0: dia_v = 0
+    viernes_1 = f_ini + timedelta(days=dia_v)
     
-    if filtro != "Todas" and st.button(f"Seleccionar todo {filtro}"):
-        st.session_state['destinos'] = opciones
+    fechas = []
+    for i in range(semanas):
+        ida = viernes_1 + timedelta(weeks=i)
+        vuelta = ida + timedelta(days=dias)
+        fechas.append((ida, vuelta))
 
-    destinos = st.multiselect("Destinos:", opciones, key='destinos')
-    presupuesto = st.number_input("Presupuesto Máx (€)", 100, 2000, 150)
-    buscar = st.button("🔎 RASTREAR VUELOS", type="primary")
-
-if buscar:
-    if not destinos: st.error("Selecciona destinos.")
-    else:
-        # Calcular fechas
-        dias_v = (4 - fecha_inicio.weekday() + 7) % 7
-        if dias_v == 0: dias_v = 0
-        primer_v = fecha_inicio + timedelta(days=dias_v)
-        
-        fechas = []
-        for i in range(semanas):
-            ida = primer_v + timedelta(weeks=i)
-            vuelta = ida + timedelta(days=dias_estancia)
-            fechas.append((ida, vuelta))
-
-        # Barra de progreso
-        progreso = st.progress(0)
-        total_ops = len(destinos) * len(fechas)
-        contador = 0
-        encontrados = 0
-
-        for f_ida, f_vuelta in fechas:
-            fi_str, fv_str = f_ida.strftime('%Y-%m-%d'), f_vuelta.strftime('%Y-%m-%d')
-            
-            with st.expander(f"🗓️ {f_ida.strftime('%d %b')} - {f_vuelta.strftime('%d %b')}", expanded=True):
-                cols = st.columns(3)
-                idx = 0
-                hay = False
+    bar = st.progress(0)
+    tot = len(destinos)*len(fechas)
+    cnt = 0
+    
+    for fi, fv in fechas:
+        fi_s, fv_s = fi.strftime('%Y-%m-%d'), fv.strftime('%Y-%m-%d')
+        with st.expander(f"🗓️ {fi.strftime('%d/%b')} - {fv.strftime('%d/%b')}", expanded=True):
+            cols = st.columns(3)
+            idx = 0
+            hay = False
+            for ciu in destinos:
+                cnt+=1
+                bar.progress(cnt/tot)
+                code = catalogo_limpio[ciu]
+                data = buscar_vuelos_api('MAD', code, fi_s, fv_s)
                 
-                for d_nombre in destinos:
-                    contador += 1
-                    progreso.progress(contador / total_ops)
-                    
-                    # Llamada API
-                    d_code = catalogo_limpio[d_nombre]
-                    res = buscar_vuelos_api('MAD', d_code, fi_str, fv_str)
-                    
-                    if res == "RATE_LIMIT": time.sleep(2)
-                    elif res:
-                        # Filtrar precio y hora
-                        validos = []
-                        for v in res:
-                            ti = datetime.strptime(v['salida_ida'], "%Y-%m-%dT%H:%M:%S")
-                            tv = datetime.strptime(v['salida_vuelta'], "%Y-%m-%dT%H:%M:%S")
-                            if v['precio'] <= presupuesto and ti.hour >= h_ida and tv.hour >= h_vuelta:
-                                validos.append({**v, 'hi': ti.strftime('%H:%M'), 'hv': tv.strftime('%H:%M')})
-                        
-                        validos.sort(key=lambda x: x['precio'])
-                        
-                        if validos:
-                            top = validos[0]
-                            with cols[idx%3]:
-                                st.success(f"{d_nombre}")
-                                st.metric(f"{top['aerolinea']}", f"{top['precio']} €")
-                                st.caption(f"{top['hi']} - {top['hv']}")
-                                st.link_button("Comprar", link_skyscanner(d_code, fi_str, fv_str))
-                            idx += 1
-                            hay = True
-                            encontrados += 1
-                
-                if not hay: st.caption("Nada interesante.")
-
-        if encontrados > 0: st.balloons()
+                if data == "RATE_LIMIT": time.sleep(1)
+                elif data:
+                    validos = [x for x in data if x['precio'] <= presupuesto]
+                    validos.sort(key=lambda x: x['precio'])
+                    if validos:
+                        top = validos[0]
+                        with cols[idx%3]:
+                            st.info(f"{ciu}")
+                            st.metric(top['aerolinea'], f"{top['precio']}€")
+                            st.caption(f"{top['h_ida']} - {top['h_vuelta']}")
+                            
+                            # --- BOTONES DE ACCIÓN ---
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                st.link_button("✈️", link_skyscanner(code, fi_s, fv_s))
+                            with c2:
+                                # EL BOTÓN MÁGICO PARA ENVIAR A TELEGRAM
+                                msg_tg = f"🔥 **BÚSQUEDA MANUAL**\n✈️ Madrid -> {ciu}\n💰 **{top['precio']}€**\n📅 {fi.strftime('%d/%m')} - {fv.strftime('%d/%m')}\n🕓 {top['h_ida']} - {top['h_vuelta']}"
+                                if st.button("📱", key=f"tg_{ciu}_{fi_s}"):
+                                    enviar_a_telegram(msg_tg)
+                            
+                        idx+=1
+                        hay=True
+            if not hay: st.caption("🚫")
