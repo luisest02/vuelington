@@ -10,19 +10,24 @@ try:
     TG_TOKEN = os.environ["TELEGRAM_TOKEN"]
     TG_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 except KeyError:
-    print("⏳ Esperando claves de Amadeus...")
+    print("❌ Error: Faltan secretos en GitHub.")
     exit()
 
 # --- CONFIGURACIÓN ---
 ORIGEN = "MAD"
-DESTINOS = ["LON", "PAR", "ROM", "MIL", "BER", "LIS", "OPO", "BRU", "AMS", "DUB", "RAK", "VCE"]
+# Reducimos destinos para la prueba rápida
+DESTINOS = ["LON", "PAR", "ROM", "MIL", "BER", "LIS"] 
 PRECIO_CHOLLO = 100 
 
 def enviar_telegram(msg):
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "Markdown"})
+    res = requests.post(url, data={"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "Markdown"})
+    if res.status_code == 200:
+        print("✅ Mensaje enviado a Telegram correctamente.")
+    else:
+        print(f"❌ Error al enviar a Telegram: {res.text}")
 
-# --- FECHAS (Próximo finde) ---
+# --- FECHAS ---
 hoy = datetime.now()
 dias_viernes = (4 - hoy.weekday() + 7) % 7
 if dias_viernes == 0: dias_viernes = 7
@@ -31,16 +36,19 @@ domingo = (hoy + timedelta(days=dias_viernes+2)).strftime('%Y-%m-%d')
 
 # --- LÓGICA ---
 try:
-    # Si las claves son "PENDIENTE", paramos suavemente
     if "PENDIENTE" in API_KEY:
-        print("Claves aún no configuradas.")
+        print("⏳ Claves no configuradas (PENDIENTE).")
         exit()
 
-    amadeus = Client(client_id=API_KEY, client_secret=API_SECRET, hostname='test')
-    msg = f"🗓️ **Finde {viernes[5:]} al {domingo[5:]}**\n"
+    print("🤖 Iniciando Bot con claves de TEST...")
+    # Usamos claves de TEST (hostname por defecto es test si no se pone production)
+    amadeus = Client(client_id=API_KEY, client_secret=API_SECRET) 
+    
+    msg = f"🗓️ **Prueba Bot ({viernes})**\n"
     encontrado = False
 
     for codigo in DESTINOS:
+        print(f"🔎 Mirando {codigo}...")
         try:
             res = amadeus.shopping.flight_offers_search.get(
                 originLocationCode=ORIGEN, destinationLocationCode=codigo,
@@ -50,21 +58,26 @@ try:
             if res.data:
                 vuelo = res.data[0]
                 precio = float(vuelo['price']['total'])
-                # Filtro: ¿Es directo?
-                directo = True
-                if len(vuelo['itineraries'][0]['segments']) > 1 or len(vuelo['itineraries'][1]['segments']) > 1:
-                    directo = False
-
-                if precio <= PRECIO_CHOLLO and directo:
-                    aerolinea = vuelo['itineraries'][0]['segments'][0]['carrierCode']
-                    msg += f"✅ {codigo}: **{precio}€** ({aerolinea})\n"
-                    encontrado = True
-        except: continue
+                aerolinea = vuelo['itineraries'][0]['segments'][0]['carrierCode']
+                
+                print(f"   -> Encontrado: {precio}€")
+                
+                # EN MODO TEST: Guardamos todo para probar que Telegram va
+                msg += f"✅ {codigo}: **{precio}€** ({aerolinea})\n"
+                encontrado = True
+                
+        except ResponseError as e:
+            print(f"⚠️ Error Amadeus en {codigo}: {e}")
+            continue
+        except Exception as e:
+            print(f"⚠️ Error General en {codigo}: {e}")
+            continue
 
     if encontrado:
-        enviar_telegram(f"🚨 **CHOLLOS DETECTADOS** 🚨\n{msg}")
+        print("📨 Enviando resumen a Telegram...")
+        enviar_telegram(f"🚨 **TEST DE CONEXIÓN** 🚨\n{msg}")
     else:
-        print("Sin chollos esta semana.")
+        print("🤷‍♂️ No se encontraron vuelos (o falló la conexión con Amadeus Test).")
 
 except Exception as e:
-    print(f"Error: {e}")
+    print(f"❌ Error Crítico del Script: {e}")
