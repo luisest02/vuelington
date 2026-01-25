@@ -6,7 +6,7 @@ import requests # <--- NECESARIO PARA TELEGRAM
 import os
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="EuroTrip Pro", page_icon="✈️", layout="wide")
+st.set_page_config(page_title="VUELINTON", page_icon="✈️", layout="wide")
 
 # ==========================================
 # 🔐 SEGURIDAD: PORTERO Y CREDENCIALES
