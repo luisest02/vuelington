@@ -1,0 +1,24 @@
+name: Bot Vuelos
+on:
+  schedule:
+    # Se ejecuta a las 06:00 AM UTC los Lunes (1) y Martes (2)
+    - cron: '0 6 * * 1,2'
+  workflow_dispatch: # Esto habilita el botón manual para probarlo
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Instalar librerías
+        run: pip install -r requirements.txt
+      - name: Ejecutar Bot de Alerta
+        env:
+          AMADEUS_API_KEY: ${{ secrets.AMADEUS_API_KEY }}
+          AMADEUS_API_SECRET: ${{ secrets.AMADEUS_API_SECRET }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python alerta.py
