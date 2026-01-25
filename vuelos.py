@@ -125,7 +125,7 @@ with st.sidebar:
     h_vuelta_min = st.slider("Regreso Domingo >", 0, 23, 16, format="%dh")
     
     st.divider()
-    presupuesto = st.number_input("Max €", 50, 2000, 150)
+    presupuesto = st.number_input("Max €", 50, 2000, 150, step=10)
     
     zona = st.selectbox("Zona", ["Todas"] + list(aeropuertos_europa.keys()))
     ops = []
