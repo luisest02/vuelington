@@ -36,7 +36,7 @@ try:
         print("Claves aún no configuradas.")
         exit()
 
-    amadeus = Client(client_id=API_KEY, client_secret=API_SECRET, hostname='production')
+    amadeus = Client(client_id=API_KEY, client_secret=API_SECRET, hostname='test')
     msg = f"🗓️ **Finde {viernes[5:]} al {domingo[5:]}**\n"
     encontrado = False
 
