@@ -1,7 +1,7 @@
 name: Bot Vuelos
 on:
   schedule:
-    # Se ejecuta a las 06:00 AM UTC los Lunes (1) y Martes (2)
+    # Se ejecuta a las 05:00 AM UTC los Martes (2)
     - cron: '0 5 * * 2'
   workflow_dispatch: # Esto habilita el botón manual para probarlo
 
