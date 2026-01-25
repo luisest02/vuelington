@@ -5,12 +5,9 @@ import time
 import requests
 import os
 
-# --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="VUELINTON", page_icon="✈️", layout="wide")
 
-# ==========================================
-# 🔐 SEGURIDAD
-# ==========================================
+# --- SEGURIDAD ---
 def check_password():
     if "PASSWORD_APP" not in st.secrets: return True
     clave = st.sidebar.text_input("🔒 Contraseña", type="password")
@@ -21,39 +18,30 @@ def check_password():
 
 check_password()
 
-# Cargar Claves
+# --- CARGA CLAVES ---
 try:
     API_KEY = st.secrets["AMADEUS_API_KEY"]
     API_SECRET = st.secrets["AMADEUS_API_SECRET"]
     TG_TOKEN = st.secrets.get("TELEGRAM_TOKEN", None)
     TG_ID = st.secrets.get("TELEGRAM_CHAT_ID", None)
 except:
-    st.error("❌ Faltan secretos de configuración.")
+    st.error("❌ Faltan secretos.")
     st.stop()
 
-# ==========================================
-# 📨 FUNCIÓN TELEGRAM (CON CHIVATO DE ERRORES)
-# ==========================================
+# --- TELEGRAM ---
 def enviar_a_telegram(texto):
     if not TG_TOKEN or not TG_ID:
-        st.error("⚠️ Faltan configurar TELEGRAM_TOKEN o TELEGRAM_CHAT_ID en Secrets.")
+        st.error("⚠️ Faltan secretos Telegram.")
         return
-    
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
     payload = {"chat_id": TG_ID, "text": texto, "parse_mode": "Markdown"}
-    
     try:
-        response = requests.post(url, data=payload)
-        if response.status_code != 200:
-            st.error(f"❌ Error Telegram: {response.text}")
-        else:
-            st.toast("✅ ¡Enviado al Canal!", icon="🚀")
-    except Exception as e:
-        st.error(f"❌ Error de conexión: {e}")
+        requests.post(url, data=payload)
+        st.toast("✅ Enviado", icon="🚀")
+    except:
+        st.toast("❌ Error", icon="🔥")
 
-# ==========================================
-# ✈️ FUNCIONES AMADEUS
-# ==========================================
+# --- DATA ---
 nombres_aerolineas = {
     "FR": "Ryanair", "U2": "EasyJet", "IB": "Iberia", "UX": "Air Europa",
     "VY": "Vueling", "HV": "Transavia", "W6": "Wizz Air", "LH": "Lufthansa",
@@ -73,7 +61,6 @@ aeropuertos_europa = {
     "❄️ Nórdicos": {"Copenhague": "CPH", "Estocolmo": "STO", "Oslo": "OSL"}
 }
 
-# Preprocesar catálogo
 catalogo_limpio = {}
 ciudades_por_region = {}
 for region, ciudades in aeropuertos_europa.items():
@@ -84,10 +71,11 @@ for region, ciudades in aeropuertos_europa.items():
         l.append(n)
     ciudades_por_region[region] = l
 
+# --- API ---
 @st.cache_data(ttl=3600, show_spinner=False)
 def buscar_vuelos_api(origen, destino, f1, f2):
     try:
-        # Hostname 'test' porque estás usando claves de testing. CAMBIA A 'production' CUANDO LAS TENGAS
+        # CAMBIA 'test' A 'production' CUANDO TENGAS CLAVES
         amadeus = Client(client_id=API_KEY, client_secret=API_SECRET, hostname='test')
         res = amadeus.shopping.flight_offers_search.get(
             originLocationCode=origen, destinationLocationCode=destino,
@@ -100,7 +88,6 @@ def buscar_vuelos_api(origen, destino, f1, f2):
                 out.append({
                     'precio': float(v['price']['total']),
                     'aerolinea': nombres_aerolineas.get(c, c),
-                    # Guardamos la hora completa "HH:MM" para filtrar luego
                     'h_ida': itin[0]['segments'][0]['departure']['at'].split('T')[1][:5],
                     'h_vuelta': itin[1]['segments'][0]['departure']['at'].split('T')[1][:5]
                 })
@@ -113,25 +100,26 @@ def buscar_vuelos_api(origen, destino, f1, f2):
 def link_skyscanner(destino, f1, f2):
     return f"https://www.skyscanner.es/transport/flights/mad/{destino.lower()}/{f1[2:].replace('-','')}/{f2[2:].replace('-','')}/"
 
-# ==========================================
-# 🖥️ INTERFAZ PRINCIPAL
-# ==========================================
+# --- INTERFAZ ---
 st.title("🚀 VUELINTON")
 
-# --- BARRA LATERAL ---
 with st.sidebar:
     st.divider()
     f_ini = st.date_input("Inicio", datetime.now())
-    semanas = st.slider("Semanas", 1, 8, 4)
-    dias = 2 if st.radio("Duración", ["2 días (V-D)", "1 día (V-S)"]) == "2 días (V-D)" else 1
+    semanas = st.slider("Semanas a mirar", 1, 8, 4)
+    
+    # NUEVO SELECTOR DE TIPO DE VIAJE
+    tipo_viaje = st.radio("Tipo de Escapada", ["Viernes - Domingo (2 noches)", "Sábado - Domingo (1 noche)"])
     
     st.divider()
-    st.subheader("⏰ Horarios (A partir de...)")
-    # SLIDERS DE HORA: Permiten elegir de 0h a 23h. Valor por defecto 15h (3PM) y 16h (4PM)
-    h_ida_min = st.slider("Salida Ida (Viernes) >", 0, 23, 15, format="%dh")
-    h_vuelta_min = st.slider("Salida Vuelta (Domingo) >", 0, 23, 16, format="%dh")
-    st.divider()
+    st.subheader("⏰ Horarios")
+    # Ajustamos el texto según lo elegido
+    txt_ida = "Salida Viernes >" if "Viernes" in tipo_viaje else "Salida Sábado >"
     
+    h_ida_min = st.slider(txt_ida, 0, 23, 8 if "Sábado" in tipo_viaje else 15, format="%dh")
+    h_vuelta_min = st.slider("Regreso Domingo >", 0, 23, 16, format="%dh")
+    
+    st.divider()
     presupuesto = st.number_input("Max €", 50, 2000, 150)
     
     zona = st.selectbox("Zona", ["Todas"] + list(aeropuertos_europa.keys()))
@@ -147,27 +135,37 @@ with st.sidebar:
     if st.button("🔎 BUSCAR", type="primary"):
         st.session_state['busqueda_activa'] = True
 
-# --- LÓGICA DE VISUALIZACIÓN ---
 if st.session_state.get('busqueda_activa') and destinos:
     
+    # Cálculo de fechas
     dia_v = (4 - f_ini.weekday() + 7) % 7
     if dia_v == 0: dia_v = 0
-    viernes_1 = f_ini + timedelta(days=dia_v)
+    primer_viernes = f_ini + timedelta(days=dia_v)
     
     fechas = []
     for i in range(semanas):
-        ida = viernes_1 + timedelta(weeks=i)
-        vuelta = ida + timedelta(days=dias)
-        fechas.append((ida, vuelta))
+        base_viernes = primer_viernes + timedelta(weeks=i)
+        
+        if "Viernes" in tipo_viaje:
+            ida = base_viernes
+            vuelta = base_viernes + timedelta(days=2) # Domingo
+            etiqueta = "V-D"
+        else:
+            ida = base_viernes + timedelta(days=1) # Sábado
+            vuelta = base_viernes + timedelta(days=2) # Domingo
+            etiqueta = "S-D"
+            
+        fechas.append((ida, vuelta, etiqueta))
 
     bar = st.progress(0)
     tot = len(destinos)*len(fechas)
     cnt = 0
     
-    for fi, fv in fechas:
+    for fi, fv, tag in fechas:
         fi_s, fv_s = fi.strftime('%Y-%m-%d'), fv.strftime('%Y-%m-%d')
+        fecha_display = f"{fi.strftime('%d/%b')} ({tag})"
         
-        with st.expander(f"🗓️ {fi.strftime('%d/%b')} - {fv.strftime('%d/%b')}", expanded=True):
+        with st.expander(f"🗓️ {fecha_display}", expanded=True):
             cols = st.columns(3)
             idx = 0
             hay = False
@@ -180,38 +178,31 @@ if st.session_state.get('busqueda_activa') and destinos:
                 
                 if data == "RATE_LIMIT": time.sleep(1)
                 elif data:
-                    # FILTRO 1: Presupuesto
-                    validos = [x for x in data if x['precio'] <= presupuesto]
+                    # Filtros manuales
+                    validos = []
+                    for x in data:
+                        hi = int(x['h_ida'].split(':')[0])
+                        hv = int(x['h_vuelta'].split(':')[0])
+                        if x['precio'] <= presupuesto and hi >= h_ida_min and hv >= h_vuelta_min:
+                            validos.append(x)
+                            
+                    validos.sort(key=lambda x: x['precio'])
                     
-                    # FILTRO 2: Horarios (Nuevo)
-                    # Convertimos "18:30" a número entero 18 para comparar
-                    validos_hora = []
-                    for x in validos:
-                        hora_i = int(x['h_ida'].split(':')[0])
-                        hora_v = int(x['h_vuelta'].split(':')[0])
-                        
-                        if hora_i >= h_ida_min and hora_v >= h_vuelta_min:
-                            validos_hora.append(x)
-                    
-                    validos_hora.sort(key=lambda x: x['precio'])
-                    
-                    if validos_hora:
-                        top = validos_hora[0]
+                    if validos:
+                        top = validos[0]
                         with cols[idx%3]:
                             st.info(f"{ciu}")
                             st.metric(top['aerolinea'], f"{top['precio']}€")
-                            st.caption(f"🛫 {top['h_ida']} - 🛬 {top['h_vuelta']}")
+                            st.caption(f"{top['h_ida']} - {top['h_vuelta']}")
                             
                             c1, c2 = st.columns(2)
                             with c1:
                                 st.link_button("✈️", link_skyscanner(code, fi_s, fv_s))
                             with c2:
-                                msg_tg = f"🔥 **BÚSQUEDA MANUAL**\n✈️ Madrid -> {ciu}\n💰 **{top['precio']}€**\n📅 {fi.strftime('%d/%m')} - {fv.strftime('%d/%m')}\n🕓 {top['h_ida']} - {top['h_vuelta']}"
+                                msg_tg = f"🔥 **MANUAL ({tag})**\n✈️ Madrid -> {ciu}\n💰 **{top['precio']}€**\n📅 {fi.strftime('%d/%m')} - {fv.strftime('%d/%m')}\n🕓 {top['h_ida']} - {top['h_vuelta']}"
                                 if st.button("📱", key=f"tg_{ciu}_{fi_s}"):
                                     enviar_a_telegram(msg_tg)
-                            
                         idx+=1
                         hay=True
-            if not hay: st.caption("🚫 Sin vuelos que cumplan filtros")
-    
+            if not hay: st.caption("🚫 Nada")
     bar.empty()
