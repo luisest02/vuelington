@@ -81,7 +81,7 @@ for region, ciudades in aeropuertos_europa.items():
 @st.cache_data(ttl=3600, show_spinner=False)
 def buscar_vuelos_api(origen, destino, f1, f2):
     try:
-        amadeus = Client(client_id=API_KEY, client_secret=API_SECRET, hostname='production')
+        amadeus = Client(client_id=API_KEY, client_secret=API_SECRET, hostname='test')
         res = amadeus.shopping.flight_offers_search.get(
             originLocationCode=origen, destinationLocationCode=destino,
             departureDate=f1, returnDate=f2, adults=1, currencyCode='EUR', max=15)
