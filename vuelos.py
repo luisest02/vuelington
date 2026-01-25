@@ -2,53 +2,59 @@ import streamlit as st
 from amadeus import Client, ResponseError
 from datetime import datetime, timedelta
 import time
-import requests # <--- NECESARIO PARA TELEGRAM
+import requests
 import os
 
-# --- CONFIGURACIÓN ---
+# --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="VUELINTON", page_icon="✈️", layout="wide")
 
 # ==========================================
-# 🔐 SEGURIDAD: PORTERO Y CREDENCIALES
+# 🔐 SEGURIDAD
 # ==========================================
 def check_password():
-    if "PASSWORD_APP" not in st.secrets: return True # Si no hay clave configurada, pasa (modo dev)
+    if "PASSWORD_APP" not in st.secrets: return True
     clave = st.sidebar.text_input("🔒 Contraseña", type="password")
     if clave != st.secrets["PASSWORD_APP"]:
         st.sidebar.error("Acceso Bloqueado")
         st.stop()
     return True
 
-check_password() # Ejecutamos el portero
+check_password()
 
 # Cargar Claves
 try:
     API_KEY = st.secrets["AMADEUS_API_KEY"]
     API_SECRET = st.secrets["AMADEUS_API_SECRET"]
-    # Intentamos cargar Telegram (Opcional, para que no falle si no los has puesto aún)
     TG_TOKEN = st.secrets.get("TELEGRAM_TOKEN", None)
     TG_ID = st.secrets.get("TELEGRAM_CHAT_ID", None)
 except:
-    st.error("Faltan secretos de configuración.")
+    st.error("❌ Faltan secretos de configuración.")
     st.stop()
 
 # ==========================================
-# 📨 FUNCIÓN ENVIAR A TELEGRAM
+# 📨 FUNCIÓN TELEGRAM (CON CHIVATO DE ERRORES)
 # ==========================================
 def enviar_a_telegram(texto):
     if not TG_TOKEN or not TG_ID:
-        st.toast("⚠️ Configura los secretos de Telegram para usar esta función.", icon="⚠️")
+        st.error("⚠️ Faltan configurar TELEGRAM_TOKEN o TELEGRAM_CHAT_ID en Secrets.")
         return
     
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
     payload = {"chat_id": TG_ID, "text": texto, "parse_mode": "Markdown"}
+    
     try:
-        requests.post(url, data=payload)
-        st.toast("✅ ¡Enviado a tu móvil!", icon="🚀")
-    except:
-        st.toast("❌ Error al enviar.", icon="🔥")
+        response = requests.post(url, data=payload)
+        # AQUÍ ESTÁ EL CAMBIO: Miramos si Telegram nos ha dicho que NO
+        if response.status_code != 200:
+            st.error(f"❌ Error Telegram: {response.text}")
+        else:
+            st.toast("✅ ¡Enviado al Canal!", icon="🚀")
+    except Exception as e:
+        st.error(f"❌ Error de conexión: {e}")
 
-# ... (DICCIONARIOS Y FUNCIONES AUXILIARES IGUAL QUE ANTES) ...
+# ==========================================
+# ✈️ FUNCIONES AMADEUS
+# ==========================================
 nombres_aerolineas = {
     "FR": "Ryanair", "U2": "EasyJet", "IB": "Iberia", "UX": "Air Europa",
     "VY": "Vueling", "HV": "Transavia", "W6": "Wizz Air", "LH": "Lufthansa",
@@ -68,6 +74,7 @@ aeropuertos_europa = {
     "❄️ Nórdicos": {"Copenhague": "CPH", "Estocolmo": "STO", "Oslo": "OSL"}
 }
 
+# Preprocesar catálogo
 catalogo_limpio = {}
 ciudades_por_region = {}
 for region, ciudades in aeropuertos_europa.items():
@@ -81,6 +88,7 @@ for region, ciudades in aeropuertos_europa.items():
 @st.cache_data(ttl=3600, show_spinner=False)
 def buscar_vuelos_api(origen, destino, f1, f2):
     try:
+        # Hostname 'test' porque estás usando claves de testing
         amadeus = Client(client_id=API_KEY, client_secret=API_SECRET, hostname='test')
         res = amadeus.shopping.flight_offers_search.get(
             originLocationCode=origen, destinationLocationCode=destino,
@@ -98,18 +106,19 @@ def buscar_vuelos_api(origen, destino, f1, f2):
                 })
         return out
     except ResponseError as e:
-        # CORRECCIÓN AQUÍ: status_code (con guion bajo)
-        if e.response and e.response.status_code == 429:
-            return "RATE_LIMIT"
+        if e.response and e.response.status_code == 429: return "RATE_LIMIT"
         return []
-    except Exception:
-        return []
+    except: return []
+
 def link_skyscanner(destino, f1, f2):
     return f"https://www.skyscanner.es/transport/flights/mad/{destino.lower()}/{f1[2:].replace('-','')}/{f2[2:].replace('-','')}/"
 
-# --- INTERFAZ ---
+# ==========================================
+# 🖥️ INTERFAZ PRINCIPAL
+# ==========================================
 st.title("🚀 VUELINTON")
 
+# --- BARRA LATERAL ---
 with st.sidebar:
     st.divider()
     f_ini = st.date_input("Inicio", datetime.now())
@@ -126,9 +135,16 @@ with st.sidebar:
     
     if zona != "Todas" and st.button("Seleccionar Todos"): st.session_state['dest'] = ops
     destinos = st.multiselect("Destinos", ops, key='dest')
-    buscar = st.button("🔎 BUSCAR", type="primary")
+    
+    # --- BOTÓN DE BÚSQUEDA PERSISTENTE ---
+    # Usamos session_state para recordar que hemos pulsado BUSCAR
+    if st.button("🔎 BUSCAR", type="primary"):
+        st.session_state['busqueda_activa'] = True
 
-if buscar and destinos:
+# --- LÓGICA DE VISUALIZACIÓN ---
+# Solo mostramos resultados si la bandera 'busqueda_activa' es True
+if st.session_state.get('busqueda_activa') and destinos:
+    
     dia_v = (4 - f_ini.weekday() + 7) % 7
     if dia_v == 0: dia_v = 0
     viernes_1 = f_ini + timedelta(days=dia_v)
@@ -139,12 +155,15 @@ if buscar and destinos:
         vuelta = ida + timedelta(days=dias)
         fechas.append((ida, vuelta))
 
+    # Barra de progreso (la ponemos arriba para que no moleste al recargar)
     bar = st.progress(0)
     tot = len(destinos)*len(fechas)
     cnt = 0
     
     for fi, fv in fechas:
         fi_s, fv_s = fi.strftime('%Y-%m-%d'), fv.strftime('%Y-%m-%d')
+        
+        # Mostramos resultados
         with st.expander(f"🗓️ {fi.strftime('%d/%b')} - {fv.strftime('%d/%b')}", expanded=True):
             cols = st.columns(3)
             idx = 0
@@ -152,6 +171,7 @@ if buscar and destinos:
             for ciu in destinos:
                 cnt+=1
                 bar.progress(cnt/tot)
+                
                 code = catalogo_limpio[ciu]
                 data = buscar_vuelos_api('MAD', code, fi_s, fv_s)
                 
@@ -166,16 +186,19 @@ if buscar and destinos:
                             st.metric(top['aerolinea'], f"{top['precio']}€")
                             st.caption(f"{top['h_ida']} - {top['h_vuelta']}")
                             
-                            # --- BOTONES DE ACCIÓN ---
                             c1, c2 = st.columns(2)
                             with c1:
                                 st.link_button("✈️", link_skyscanner(code, fi_s, fv_s))
                             with c2:
-                                # EL BOTÓN MÁGICO PARA ENVIAR A TELEGRAM
                                 msg_tg = f"🔥 **BÚSQUEDA MANUAL**\n✈️ Madrid -> {ciu}\n💰 **{top['precio']}€**\n📅 {fi.strftime('%d/%m')} - {fv.strftime('%d/%m')}\n🕓 {top['h_ida']} - {top['h_vuelta']}"
+                                # Al pulsar este botón, la página se recarga, 
+                                # PERO como 'busqueda_activa' sigue siendo True, volvemos a entrar aquí
                                 if st.button("📱", key=f"tg_{ciu}_{fi_s}"):
                                     enviar_a_telegram(msg_tg)
                             
                         idx+=1
                         hay=True
-            if not hay: st.caption("🚫")
+            if not hay: st.caption("🚫 Sin vuelos en rango")
+    
+    # Limpiamos la barra al final
+    bar.empty()
