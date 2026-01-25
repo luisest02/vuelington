@@ -17,41 +17,41 @@ except KeyError:
 # --- CONFIGURACIÓN ---
 ORIGEN = "MAD"
 PRECIO_CHOLLO = 160 
-MESES_VISTA = 3
+MESES_VISTA = 2 # Mantenemos 2 meses para permitir la doble búsqueda sin coste extra
 SEMANAS_A_MIRAR = MESES_VISTA * 4 
 
-# 🌍 LISTA DEFINITIVA "EUROTRIP FRIENDS" (Top 20)
-# Optimizada matemáticamente para no pasar de 2.000 llamadas al mes.
+# 🌍 LISTA "EUROTRIP BALCANES & ESTE" (Top 21)
 DESTINOS = [
-    # 🍻 FIESTA, AMBIENTE JOVEN & CLÁSICOS
-    "AMS", # Ámsterdam (Canales y vida nocturna)
-    "BER", # Berlín (La capital del Techno y la historia)
-    "PRG", # Praga (Cerveza más barata que el agua)
-    "BUD", # Budapest (Los Ruin Bars son obligatorios)
-    "DUB", # Dublín (Ruta de pubs y Guinness)
-    "BRU", # Bruselas (Gofres, patatas y cervezas fuertes)
-    
-    # 💎 JOYAS BARATAS (Lo mejor del Este/Sur)
-    "KRK", # Cracovia (Mucha fiesta, vodka y muy barato)
-    "WAW", # Varsovia (Rascacielos y casco antiguo, mezcla top)
-    "SOF", # Sofía (Destino muy económico y sorprendente)
-    "OTP", # Bucarest (La "París del este", vida nocturna intensa)
-    "MLA", # Malta (El destino de sol y fiesta por excelencia)
-    
-    # 🍕 ITALIA "VIBES"
-    "ROM", # Roma (Historia y pasta)
-    "MIL", # Milán (Vuelos casi regalados siempre)
-    "VCE", # Venecia (Única en el mundo, para ir antes de que se hunda)
-    "NAP", # Nápoles (Caos, pizza real y Maradona. Brutal con amigos)
-    "BLQ", # Bolonia (Ciudad universitaria, ambiente joven y comida)
+    # 💎 LA NUEVA OLA (Albania, Rumanía, Croacia) - Muy baratos y de moda
+    "TIA", # Tirana (Albania) - La joya de moda
+    "OTP", # Bucarest (Rumanía) - Vida nocturna top
+    "CLJ", # Cluj-Napoca (Rumanía) - Ciudad universitaria y de festivales
+    "ZAG", # Zagreb (Croacia) - Capital preciosa y económica
+    "SOF", # Sofía (Bulgaria) - De lo más barato de Europa
 
-    # 🎩 LOS IMPRESCINDIBLES
-    "LON", # Londres (Siempre hay algo que hacer)
-    "PAR", # París (Nunca falla)
+    # 🍻 POLONIA & HUNGRÍA (Fiesta asegurada)
+    "KRK", # Cracovia (Imprescindible con amigos)
+    "WAW", # Varsovia (Mezcla historia y rascacielos)
+    "BUD", # Budapest (Termas y Ruin Bars)
+    "PRG", # Praga (Cerveza y vistas)
 
-    # 🇵🇹 VECINOS TOP
-    "LIS", # Lisboa (Miradores, tranvías y fiesta en Barrio Alto)
-    "OPO"  # Oporto (Vino, vistas al río y francesinhas)
+    # 🏛️ CLÁSICOS & FIESTA
+    "BER", # Berlín (Techno)
+    "AMS", # Ámsterdam (Canales)
+    "DUB", # Dublín (Pubs)
+    "BRU", # Bruselas (Cerveza fuerte)
+    "MLA", # Malta (Sol y fiesta mediterránea)
+
+    # 🍕 ITALIA (Siempre renta)
+    "ROM", # Roma
+    "MIL", # Milán
+    "VCE", # Venecia
+    "NAP", # Nápoles (Caos divertido)
+    "BLQ", # Bolonia (Ambiente universitario)
+
+    # 🎩 LOS GRANDES
+    "LON", # Londres
+    "PAR"  # París
 ]
 
 def enviar_telegram(msg):
@@ -77,66 +77,85 @@ try:
     if dias_viernes == 0: dias_viernes = 7
     primer_viernes = hoy + timedelta(days=dias_viernes)
 
-    print(f"🔎 Buscando Eurotrips a 3 meses vista (Top 20 destinos)...")
+    print(f"🔎 Buscando Eurotrips (V-D y S-D) a {MESES_VISTA} meses vista...")
 
     # BUCLE DE FECHAS
     for i in range(SEMANAS_A_MIRAR):
-        viernes = (primer_viernes + timedelta(weeks=i)).strftime('%Y-%m-%d')
-        domingo = (primer_viernes + timedelta(weeks=i) + timedelta(days=2)).strftime('%Y-%m-%d')
+        # Fechas base de esa semana
+        date_viernes = primer_viernes + timedelta(weeks=i)
+        date_sabado = date_viernes + timedelta(days=1)
+        date_domingo = date_viernes + timedelta(days=2)
         
+        str_viernes = date_viernes.strftime('%Y-%m-%d')
+        str_sabado = date_sabado.strftime('%Y-%m-%d')
+        str_domingo = date_domingo.strftime('%Y-%m-%d')
+        
+        # DEFINIMOS LAS 2 BÚSQUEDAS POR SEMANA
+        opciones_busqueda = [
+            # Opción 1: Viernes Tarde -> Domingo (Cualquier hora vuelta)
+            {"ida": str_viernes, "vuelta": str_domingo, "tag": "V-D", "h_min": 14, "h_max": 23},
+            # Opción 2: Sábado Mañana -> Domingo Tarde (Estricto)
+            {"ida": str_sabado, "vuelta": str_domingo, "tag": "S-D", "h_min": 5, "h_max": 14}
+        ]
+
         # BUCLE DE CIUDADES
         for codigo in DESTINOS:
-            try:
-                res = amadeus.shopping.flight_offers_search.get(
-                    originLocationCode=ORIGEN, destinationLocationCode=codigo,
-                    departureDate=viernes, returnDate=domingo,
-                    adults=1, currencyCode='EUR', max=2 # Mínimo necesario
-                )
-                
-                if not res.data: continue
+            for opcion in opciones_busqueda:
+                try:
+                    res = amadeus.shopping.flight_offers_search.get(
+                        originLocationCode=ORIGEN, destinationLocationCode=codigo,
+                        departureDate=opcion["ida"], returnDate=opcion["vuelta"],
+                        adults=1, currencyCode='EUR', max=1 
+                    )
+                    
+                    if not res.data: continue
+                    vuelo = res.data[0] 
 
-                for vuelo in res.data:
-                    # 1. Precio
+                    # 1. Filtro Precio
                     precio = float(vuelo['price']['total'])
                     if precio > PRECIO_CHOLLO: continue
 
-                    # 2. Horarios (Ida Viernes > 14:00)
                     segs_ida = vuelo['itineraries'][0]['segments']
                     segs_vuelta = vuelo['itineraries'][1]['segments']
                     
+                    # 2. Filtro Horario IDA
                     h_salida = int(segs_ida[0]['departure']['at'].split('T')[1][:2])
-                    if h_salida < 14: continue 
+                    if not (opcion["h_min"] <= h_salida <= opcion["h_max"]): continue
                     
+                    # 3. Filtro Horario VUELTA (Domingo)
+                    h_regreso = int(segs_vuelta[0]['departure']['at'].split('T')[1][:2])
+                    
+                    # Si es la opción Sábado-Domingo, exigimos volver tarde (>15:00)
+                    if opcion["tag"] == "S-D" and h_regreso < 15: continue
+                    
+                    # Preparar datos
                     h_ida_str = segs_ida[0]['departure']['at'].split('T')[1][:5]
                     h_vuelta_str = segs_vuelta[0]['departure']['at'].split('T')[1][:5]
                     aerolinea = segs_ida[0]['carrierCode']
                     
-                    # Fecha bonita (ej: 10/Feb)
-                    fecha_bonita = f"{viernes[8:]}/{viernes[5:7]}"
+                    icono = "⚡" if opcion["tag"] == "S-D" else "📅" 
+                    fecha_bonita = f"{opcion['ida'][8:]}/{opcion['ida'][5:7]}"
 
                     ranking_global.append({
                         'precio': precio,
-                        'linea': f"✈️ {codigo} ({fecha_bonita}): **{precio}€** | V{h_ida_str}-D{h_vuelta_str} ({aerolinea})"
+                        'linea': f"{icono} {codigo} ({fecha_bonita}): **{precio}€** | {opcion['tag']} {h_ida_str}-{h_vuelta_str} ({aerolinea})"
                     })
                     
-            except Exception:
-                continue
+                except Exception:
+                    continue
 
     # --- ENVIAR RESUMEN ---
     if ranking_global:
-        # Ordenamos por PRECIO
         ranking_global.sort(key=lambda x: x['precio'])
         
-        msg = f"🌍 **EUROTRIP FRIENDS** (Próx 3 meses)\n_Top Chollos encontrados:_\n\n"
-        
-        # Mostramos solo el TOP 25
+        msg = f"🌍 **EUROTRIP FRIENDS** (Próx {MESES_VISTA} meses)\n_Top Chollos (V-D y S-D):_\n\n"
         for item in ranking_global[:25]:
             msg += item['linea'] + "\n"
-            
+        
         enviar_telegram(msg)
-        print("✅ Enviado resumen a Telegram.")
+        print("✅ Resumen enviado.")
     else:
-        print("🤷‍♂️ No se encontró nada interesante.")
+        print("🤷‍♂️ Nada interesante.")
 
 except Exception as e:
     print(f"❌ Error: {e}")
