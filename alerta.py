@@ -4,144 +4,123 @@ from datetime import datetime, timedelta
 import time
 
 # --- CONFIGURACIÓN ---
-# Consigue tu API Key en serpapi.com (Plan Free)
 try:
-    SERPAPI_KEY = os.environ["SERPAPI_KEY"] # ¡Crea este secreto en GitHub!
+    # ⚠️ RECUERDA: Tienes que crear el secreto SERPAPI_KEY en GitHub
+    SERPAPI_KEY = os.environ["SERPAPI_KEY"]
     TG_TOKEN = os.environ["TELEGRAM_TOKEN"]
     TG_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 except KeyError:
-    print("❌ Faltan secretos (SERPAPI_KEY, TELEGRAM...).")
+    print("❌ Faltan secretos en GitHub.")
     exit()
 
 ORIGEN = "MAD"
-DESTINO_GENERAL = "Europe" # Buscamos en todo el continente
-PRECIO_MAXIMO = 180       # Sube un poco, Google suele dar precios finales
-SEMANAS_A_MIRAR = 8       # Miramos 2 meses vista
+DESTINO_GENERAL = "Europe" 
+PRECIO_MAXIMO = 180       
+SEMANAS_A_MIRAR = 8       # Miramos 2 meses vista (8 peticiones en total)
 
-# --- FILTROS INTELIGENTES DE HORARIO ---
-# Formato SerpApi: "HHMM,HHMM" (Rango de horas)
-HORA_IDA = "1400,2359"    # Viernes a partir de las 14:00
-HORA_VUELTA = "1600,2359" # Domingo a partir de las 16:00 (para aprovechar el día)
+# --- FILTROS DE HORARIO (Formato SerpApi: HHMM..HHMM) ---
+# Ida: Viernes desde las 14:00 hasta final del día
+HORA_IDA = "1400..2359"    
+# Vuelta: Domingo desde las 16:00 hasta final del día
+HORA_VUELTA = "1600..2359" 
 
 def enviar_telegram(msg):
     if not msg: return
-    if len(msg) > 4000: msg = msg[:4000] + "..."
+    # Telegram tiene límite de 4096 caracteres
+    if len(msg) > 4000: msg = msg[:4000] + "\n...(cortado)"
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "Markdown"})
 
 def buscar_google_smart(fecha_ida, fecha_vuelta):
     url = "https://serpapi.com/search"
-    
     params = {
         "engine": "google_flights",
         "departure_id": ORIGEN,
-        "arrival_id": DESTINO_GENERAL, # Truco: Buscamos a "Europa"
+        "arrival_id": DESTINO_GENERAL,
         "outbound_date": fecha_ida,
         "return_date": fecha_vuelta,
         "currency": "EUR",
-        "hl": "es", # Idioma español para nombres de ciudades
+        "hl": "es",
         "api_key": SERPAPI_KEY,
-        
-        # 🔥 AQUÍ ESTÁ LA MAGIA DEL FILTRO HORARIO
-        "outbound_times": HORA_IDA,   # Filtra la ida
-        "return_times": HORA_VUELTA,  # Filtra la vuelta
-        "stops": "0",                 # 0 = Solo directos (opcional, ahorra tiempo)
-        "type": "1"                   # 1 = Round Trip
+        "outbound_times": HORA_IDA,   
+        "return_times": HORA_VUELTA,  
+        "stops": "0",                 # Solo directos
+        "type": "1"                   # Ida y vuelta
     }
     
     try:
-        # Esto consume 1 crédito de búsqueda
-        data = requests.get(url, params=params).json()
+        # ⚠️ ESTO GASTA 1 CRÉDITO DE TU PLAN GRATUITO
+        response = requests.get(url, params=params)
+        data = response.json()
         
-        # Google devuelve "price_graph" o "other_flights" en búsquedas generales.
-        # A veces, para "Europe", devuelve una lista de destinos en 'other_flights'
-        # o dentro de 'destinations' (depende de cómo responda Google ese día).
-        
-        resultados = []
-        
-        # Estrategia: Google suele devolver "other_flights" con listas de destinos
+        # En búsquedas generales ("Europe"), los resultados suelen venir en "other_flights"
         vuelos = data.get("other_flights", [])
         
-        # Si no hay vuelos directos en la lista principal, a veces da nada.
-        if not vuelos:
-             print(f"💨 Sin resultados para {fecha_ida}")
-             return []
-
+        resultados = []
         for v in vuelos:
-            # Estructura típica de SerpApi Google Flights
             try:
                 precio = v.get("price", 9999)
                 if precio > PRECIO_MAXIMO: continue
                 
-                # Extraer destino
                 destino = v["flights"][0]["arrival_airport"]["name"]
-                aerolinea = v["flights"][0]["airline"]
                 
-                # Horarios reales (Google ya ha filtrado, pero para mostrarlo)
-                # OJO: En vista "Explore" a veces resume la info.
+                # Horarios para mostrar
                 h_salida = v["flights"][0]["departure_airport"]["time"]
                 h_regreso = v["flights"][-1]["departure_airport"]["time"]
                 
                 resultados.append({
                     "destino": destino,
                     "precio": precio,
-                    "aerolinea": aerolinea,
-                    "h_ida": h_salida,
-                    "h_vuelta": h_regreso
+                    "horas": f"{h_salida}-{h_regreso}"
                 })
             except:
                 continue
-                
         return resultados
 
     except Exception as e:
         print(f"Error API: {e}")
         return []
 
-# --- MAIN ---
-print(f"🚀 Iniciando barrido inteligente Google Flights ({SEMANAS_A_MIRAR} findes)...")
+# --- EJECUCIÓN ---
+print(f"🚀 Buscando vuelos de Viernes tarde a Domingo tarde...")
 reporte = []
 
-# Calculamos próximo Viernes
 hoy = datetime.now()
-dias_hasta_viernes = (4 - hoy.weekday() + 7) % 7
-if dias_hasta_viernes == 0: dias_hasta_viernes = 7
-primer_viernes = hoy + timedelta(days=dias_hasta_viernes)
+# Calcular próximo viernes
+dias_viernes = (4 - hoy.weekday() + 7) % 7
+if dias_viernes == 0: dias_viernes = 7
+primer_viernes = hoy + timedelta(days=dias_viernes)
 
 for i in range(SEMANAS_A_MIRAR):
-    # Fechas
     viernes = primer_viernes + timedelta(weeks=i)
     domingo = viernes + timedelta(days=2)
     
     s_viernes = viernes.strftime('%Y-%m-%d')
     s_domingo = domingo.strftime('%Y-%m-%d')
-    fecha_humana = viernes.strftime('%d/%m')
+    fecha_humana = viernes.strftime('%d/%b')
     
-    print(f"🔎 Mirando finde {fecha_humana}...")
+    print(f"🔎 {fecha_humana} ({s_viernes})...")
     
-    # 1 LLAMADA A LA API (Busca en toda Europa a la vez)
+    # Llamada a la API
     chollos = buscar_google_smart(s_viernes, s_domingo)
     
     if chollos:
-        # Ordenamos por precio
         chollos.sort(key=lambda x: x['precio'])
+        top = chollos[:3] # Top 3 destinos más baratos
         
-        top_3 = chollos[:3] # Nos quedamos los 3 mejores de ese finde
-        
-        txt_finde = f"🗓️ **{fecha_humana}**:"
-        for c in top_3:
-            # Link para comprar
+        txt = f"🗓️ **{fecha_humana}**"
+        for c in top:
+            # Enlace directo a Google Flights para comprar
             link = f"https://www.google.com/travel/flights?q=Flights%20to%20{c['destino']}%20on%20{s_viernes}%20through%20{s_domingo}"
-            txt_finde += f"\n✈️ [{c['destino']}]({link}) **{c['precio']}€** ({c['h_ida']}-{c['h_vuelta']})"
-        
-        reporte.append(txt_finde)
+            txt += f"\n✈️ [{c['destino']}]({link}) **{c['precio']}€** ({c['horas']})"
+        reporte.append(txt)
     
-    # Pausa de seguridad (aunque SerpApi aguanta bien)
+    # Pausa de cortesía
     time.sleep(1)
 
 if reporte:
     cuerpo = "\n\n".join(reporte)
-    enviar_telegram(f"⚡ **GOOGLE SNIPER ALERT** ⚡\n_Filtro: V({HORA_IDA.replace(',','-')}) - D({HORA_VUELTA.replace(',','-')})_\n\n{cuerpo}")
+    enviar_telegram(f"⚡ **GOOGLE SNIPER** ⚡\n_Filtro: V({HORA_IDA}) - D({HORA_VUELTA})_\n\n{cuerpo}")
     print("✅ Enviado.")
 else:
-    print("No se encontraron vuelos baratos en tus horarios.")
+    print("Nada encontrado.")
