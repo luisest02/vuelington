@@ -2,25 +2,24 @@ import os
 import requests
 from datetime import datetime, timedelta
 import time
+import re
 
 # --- CONFIGURACIÓN ---
 SEMANAS_A_MIRAR = 13
 PRECIO_MAXIMO = 200
-
-# CORRECCIÓN: Código ID de Europa
-DESTINO_BOT = "/m/02j9z" 
+DESTINO_BOT = "/m/02j9z" # Europa
 
 try:
     SERPAPI_KEY = os.environ["SERPAPI_KEY"]
     TG_TOKEN = os.environ["TELEGRAM_TOKEN"]
     TG_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 except KeyError:
-    print("❌ Error: Faltan secretos.")
+    print("❌ Error: Faltan secretos (Environment Variables).")
     exit()
 
 def enviar_telegram(msg):
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "Markdown"})
+    requests.post(url, data={"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "Markdown", "disable_web_page_preview": True})
 
 def buscar_vuelos_google(f_ida, f_vuelta):
     url = "https://serpapi.com/search"
@@ -35,26 +34,58 @@ def buscar_vuelos_google(f_ida, f_vuelta):
         "api_key": SERPAPI_KEY,
         "stops": "0",
         "price_max": PRECIO_MAXIMO,
-        
-        # CORRECCIÓN HORARIA: Formato "H,H" (0-23)
-        "outbound_times": "15,23", # Viernes tarde (15h-23h)
-        "return_times": "16,23"    # Domingo tarde (16h-23h)
+        "outbound_times": "15,23", # Viernes tarde
+        "return_times": "16,23"    # Domingo tarde
     }
 
     try:
-        res = requests.get(url, params=params)
+        res = requests.get(url, params=params, timeout=30)
         data = res.json()
         
         if "error" in data:
-            print(f"Error Google: {data['error']}")
+            print(f"⚠️ Error API Google: {data['error']}")
             return []
             
-        return data.get("other_flights", [])
+        # MEJORA: Combinar listas como en la app manual
+        raw = data.get("best_flights", []) + data.get("other_flights", []) + data.get("destinations", [])
+        
+        clean = []
+        for v in raw:
+            try:
+                # 1. Parsing Precio
+                p_val = 9999
+                p_raw = v.get("price", v.get("flight_cost"))
+                
+                if isinstance(p_raw, int): p_val = p_raw
+                elif isinstance(p_raw, str):
+                    nums = re.findall(r'\d+', p_raw)
+                    if nums: p_val = int(nums[0])
+                
+                if p_val > PRECIO_MAXIMO: continue
 
-    except: return []
+                # 2. Parsing Datos
+                if "flights" in v:
+                    seg = v["flights"][0]
+                    dest = seg["arrival_airport"]["name"]
+                else:
+                    dest = v.get("name", "Destino")
+
+                # 3. Link
+                link = f"https://www.google.com/travel/flights?q=Flights%20to%20{dest}%20from%20MAD%20on%20{f_ida}%20returning%20{f_vuelta}"
+
+                clean.append({"destino": dest, "precio": p_val, "link": link})
+            except Exception:
+                continue
+
+        clean.sort(key=lambda x: x['precio'])
+        return clean
+
+    except Exception as e:
+        print(f"❌ Error Excepción: {e}")
+        return []
 
 # --- EJECUCIÓN ---
-print("🚀 Iniciando escaneo...")
+print("🚀 Iniciando escaneo semanal...")
 reporte = []
 
 hoy = datetime.now()
@@ -67,28 +98,21 @@ for i in range(SEMANAS_A_MIRAR):
     d = v + timedelta(days=2)
     s_v, s_d = v.strftime('%Y-%m-%d'), d.strftime('%Y-%m-%d')
     
-    print(f"🔎 {s_v}...")
+    print(f"🔎 Escaneando finde {s_v}...")
     vuelos = buscar_vuelos_google(s_v, s_d)
     
     if vuelos:
-        vuelos.sort(key=lambda x: x.get('price', 9999))
-        top = vuelos[:3]
-        
+        top = vuelos[:3] # Top 3 más baratos por fin de semana
         txt = f"🗓️ **{v.strftime('%d/%b')}**"
         for x in top:
-            try:
-                dest = x["flights"][0]["arrival_airport"]["name"]
-                precio = x["price"]
-                link = f"https://www.google.com/travel/flights?tfs={x['flights'][0]['arrival_airport']['id']}"
-                txt += f"\n✈️ [{dest}]({link}) **{precio}€**"
-            except: pass
+            txt += f"\n✈️ [{x['destino']}]({x['link']}) **{x['precio']}€**"
         reporte.append(txt)
     
-    time.sleep(1)
+    time.sleep(1) # Respetar API rate limits
 
 if reporte:
     msg = "\n\n".join(reporte)
     enviar_telegram(f"🌍 **RESUMEN VUELOS (V-D Tarde)**\n\n{msg}")
-    print("Enviado.")
+    print("✅ Reporte enviado a Telegram.")
 else:
-    print("Nada encontrado.")
+    print("⚠️ Nada encontrado por debajo del precio máximo.")
