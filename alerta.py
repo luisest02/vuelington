@@ -7,7 +7,7 @@ import time
 SEMANAS_A_MIRAR = 13
 PRECIO_MAXIMO = 200
 
-# CORRECCIÓN AQUÍ: Usamos el ID de Europa
+# CORRECCIÓN: Código ID de Europa
 DESTINO_BOT = "/m/02j9z" 
 
 try:
@@ -27,7 +27,7 @@ def buscar_vuelos_google(f_ida, f_vuelta):
     params = {
         "engine": "google_flights",
         "departure_id": "MAD",
-        "arrival_id": DESTINO_BOT, # Usamos el código /m/02j9z
+        "arrival_id": DESTINO_BOT, 
         "outbound_date": f_ida,
         "return_date": f_vuelta,
         "currency": "EUR",
@@ -35,8 +35,10 @@ def buscar_vuelos_google(f_ida, f_vuelta):
         "api_key": SERPAPI_KEY,
         "stops": "0",
         "price_max": PRECIO_MAXIMO,
-        "outbound_times": "1500,2359", # Viernes tarde
-        "return_times": "1600,2359"    # Domingo tarde
+        
+        # CORRECCIÓN HORARIA: Formato "H,H" (0-23)
+        "outbound_times": "15,23", # Viernes tarde (15h-23h)
+        "return_times": "16,23"    # Domingo tarde (16h-23h)
     }
 
     try:
@@ -69,7 +71,6 @@ for i in range(SEMANAS_A_MIRAR):
     vuelos = buscar_vuelos_google(s_v, s_d)
     
     if vuelos:
-        # Ordenar y coger Top 3
         vuelos.sort(key=lambda x: x.get('price', 9999))
         top = vuelos[:3]
         
@@ -78,7 +79,6 @@ for i in range(SEMANAS_A_MIRAR):
             try:
                 dest = x["flights"][0]["arrival_airport"]["name"]
                 precio = x["price"]
-                # Link directo
                 link = f"https://www.google.com/travel/flights?tfs={x['flights'][0]['arrival_airport']['id']}"
                 txt += f"\n✈️ [{dest}]({link}) **{precio}€**"
             except: pass
