@@ -3,19 +3,18 @@ import requests
 from datetime import datetime, timedelta
 import pandas as pd
 
-st.set_page_config(page_title="VUELINTON PRO", page_icon="✈️", layout="wide")
+st.set_page_config(page_title="VUELINGTON PRO", page_icon="✈️", layout="wide")
 
 # ==========================================
-# 🔐 GESTIÓN DE SECRETOS (DEBUG)
+# 🔐 GESTIÓN DE SECRETOS
 # ==========================================
 if "SERPAPI_KEY" not in st.secrets:
-    st.error("🚨 ERROR CRÍTICO: No se encuentra 'SERPAPI_KEY' en los secretos.")
-    st.info("Ve a 'Settings' > 'Secrets' en Streamlit Cloud y añade tu clave.")
+    st.error("🚨 FALTA LA CLAVE: Añade 'SERPAPI_KEY' en los secretos de Streamlit.")
     st.stop()
 
 API_KEY = st.secrets["SERPAPI_KEY"]
 
-# Login simple (Opcional)
+# Login simple
 if "PASSWORD_APP" in st.secrets:
     if "auth" not in st.session_state: st.session_state.auth = False
     if not st.session_state.auth:
@@ -26,47 +25,41 @@ if "PASSWORD_APP" in st.secrets:
         st.stop()
 
 # ==========================================
-# ⚙️ BARRA LATERAL (CONFIGURACIÓN)
+# ⚙️ CONFIGURACIÓN LATERAL
 # ==========================================
 with st.sidebar:
-    st.title("🎛️ Filtros Avanzados")
+    st.header("🎛️ Filtros")
     
-    st.markdown("### 🕒 Horarios Finde")
-    usar_filtro_horas = st.checkbox("Activar Filtro Horario", value=True)
+    # Selector de Horas
+    activar_horas = st.toggle("Filtrar por Horario", value=True)
     
     str_ida = None
     str_vuelta = None
     
-    if usar_filtro_horas:
-        # Sliders para personalizar las horas
+    if activar_horas:
+        # Sliders de horas (0-23)
         h_ida = st.slider("Salida Viernes (desde)", 0, 23, 15, format="%dh")
-        h_vuelta = st.slider("Vuelta Domingo (desde)", 0, 23, 17, format="%dh")
+        h_vuelta = st.slider("Vuelta Domingo (desde)", 0, 23, 16, format="%dh")
         
-        # Formato exacto para SerpApi: "HHmm,2359"
+        # Formato SerpApi: "HHmm,2359"
         str_ida = f"{h_ida:02d}00,2359"
         str_vuelta = f"{h_vuelta:02d}00,2359"
-        st.caption(f"Busca ida > {h_ida}:00 y vuelta > {h_vuelta}:00")
-    else:
-        st.caption("Buscando a cualquier hora del día")
-
+    
     st.divider()
     
-    # Botón para verificar saldo de la API
     if st.button("Verificar Saldo API"):
         try:
-            info = requests.get(f"https://serpapi.com/account?api_key={API_KEY}").json()
-            if "error" in info:
-                st.error(f"Error clave: {info['error']}")
+            res = requests.get(f"https://serpapi.com/account?api_key={API_KEY}")
+            if res.status_code == 200:
+                st.metric("Búsquedas restantes", res.json().get("total_searches_left", 0))
             else:
-                total = info.get("total_searches_left", 0)
-                st.metric("Búsquedas Restantes", total)
-        except Exception as e:
-            st.error(f"Error conectando: {e}")
+                st.error("Error de clave")
+        except: st.error("Error conexión")
 
 # ==========================================
-# 🚀 FUNCIÓN DE BÚSQUEDA
+# 🚀 FUNCIÓN BÚSQUEDA CORREGIDA
 # ==========================================
-def buscar_google_manual(origen, region_code, f_ida, f_vuelta, max_price, times_out, times_in):
+def buscar_vuelos(origen, destino_id, f_ida, f_vuelta, precio_max, t_ida, t_vuelta):
     url = "https://serpapi.com/search"
     
     params = {
@@ -75,121 +68,96 @@ def buscar_google_manual(origen, region_code, f_ida, f_vuelta, max_price, times_
         "outbound_date": f_ida,
         "return_date": f_vuelta,
         "currency": "EUR",
-        "hl": "es",
+        "hl": "es", # Idioma español
         "api_key": API_KEY,
-        "stops": "0", # Solo vuelos directos
+        "stops": "0", # Solo directos
         "type": "1"   # Ida y vuelta
     }
 
-    # Si elegimos una región específica (Europa), la añadimos.
-    # Si es "Everywhere" (Mundo), NO enviamos arrival_id para que Google sugiera.
-    if region_code != "Everywhere":
-        params["arrival_id"] = region_code
+    # CORRECCIÓN IMPORTANTE: Si es Mundo Entero, NO mandamos arrival_id
+    if destino_id:
+        params["arrival_id"] = destino_id
 
-    if max_price:
-        params["price_max"] = max_price
+    if precio_max:
+        params["price_max"] = precio_max
 
-    # Aplicar filtros de hora solo si están definidos
-    if times_out and times_in:
-        params["outbound_times"] = times_out
-        params["return_times"] = times_in
+    if t_ida and t_vuelta:
+        params["outbound_times"] = t_ida
+        params["return_times"] = t_vuelta
 
     try:
-        response = requests.get(url, params=params)
-        data = response.json()
+        r = requests.get(url, params=params)
+        data = r.json()
         
-        # Depuración de errores de la API
+        # Gestión de Errores de Google
         if "error" in data:
             st.error(f"❌ Google Error: {data['error']}")
             return []
             
-        # Intentamos extraer vuelos de las diferentes secciones que usa Google
-        lista = data.get("other_flights", [])
-        if not lista:
-            lista = data.get("destinations", [])
-            
-        return lista
+        # Google devuelve los chollos genéricos en 'other_flights'
+        # Si buscamos "Mundo Entero", a veces vienen en 'destinations'
+        return data.get("other_flights", []) or data.get("destinations", [])
 
     except Exception as e:
-        st.error(f"🔥 Error de conexión: {e}")
+        st.error(f"Error Python: {e}")
         return []
 
 # ==========================================
 # 🖥️ INTERFAZ PRINCIPAL
 # ==========================================
 st.title("✈️ VUELINGTON EXPLORER")
-st.markdown("Buscador de chollos manual.")
+st.caption("Buscador de chollos manual.")
 
-col1, col2, col3 = st.columns(3)
+c1, c2, c3 = st.columns(3)
+with c1: f_ida = st.date_input("Ida", datetime.now() + timedelta(days=5))
+with c2: f_vuelta = st.date_input("Vuelta", datetime.now() + timedelta(days=7))
+with c3:
+    region_txt = st.selectbox("Destino", ["Europa", "Mundo Entero"])
+    
+    # ⚠️ AQUÍ ESTÁ EL FIX: CÓDIGOS REALES DE GOOGLE
+    if region_txt == "Europa":
+        region_code = "/m/02j9z" # Código interno de Google para Europa
+    else:
+        region_code = "" # Vacío para "Explore / Mundo"
 
-with col1:
-    f_ida = st.date_input("Fecha Ida", datetime.now() + timedelta(days=5)) # Por defecto prox viernes
-with col2:
-    f_vuelta = st.date_input("Fecha Vuelta", datetime.now() + timedelta(days=7)) # Por defecto prox domingo
-with col3:
-    region = st.selectbox("Destino", ["Europa", "Mundo Entero"])
-    # Mapeo: Europa usa código 'Europe', Mundo usa código interno 'Everywhere'
-    code_map = {"Europa": "Europe", "Mundo Entero": "Everywhere"}
-    region_code = code_map[region]
-
-presupuesto = st.slider("Presupuesto Máximo (€)", 50, 600, 150)
+presupuesto = st.slider("Presupuesto Máximo", 50, 500, 150)
 
 if st.button("🔎 BUSCAR VUELOS", type="primary"):
-    with st.spinner(f"Buscando gangas en {region}..."):
-        
-        resultados = buscar_google_manual(
-            "MAD", 
-            region_code, 
+    with st.spinner("Consultando Google Flights..."):
+        vuelos = buscar_vuelos(
+            "MAD", region_code, 
             f_ida.strftime('%Y-%m-%d'), 
             f_vuelta.strftime('%Y-%m-%d'), 
-            presupuesto,
-            str_ida,    # Filtro hora ida
-            str_vuelta  # Filtro hora vuelta
+            presupuesto, str_ida, str_vuelta
         )
         
-        if not resultados:
-            st.warning("⚠️ No se encontraron vuelos con estos filtros. Prueba a:")
-            st.markdown("- Subir el presupuesto.")
-            st.markdown("- Desactivar el filtro de horas en la barra lateral.")
-            st.markdown("- Cambiar las fechas.")
+        if not vuelos:
+            st.warning("No se encontraron vuelos baratos con estos filtros.")
         else:
-            # Procesar datos para mostrar
-            tabla = []
-            for v in resultados:
+            items = []
+            for v in vuelos:
                 try:
-                    # Caso 1: Estructura normal de vuelos
+                    # Formato Lista de Vuelos
                     if "flights" in v:
                         seg = v["flights"][0]
-                        precio = v.get("price", 0)
-                        item = {
+                        items.append({
                             "Destino": seg["arrival_airport"]["name"],
-                            "Precio": f"{precio}€",
+                            "Precio": f"{v.get('price',0)}€",
                             "Aerolínea": seg["airline"],
-                            "Hora Salida": seg["departure_airport"]["time"],
-                            # Truco para enlace: Google Flights a veces no da URL directa
-                            "Link": f"https://www.google.com/travel/flights?tfs={seg['arrival_airport']['id']}" 
-                        }
-                        tabla.append(item)
-                    
-                    # Caso 2: Estructura 'Explore' (Mapa)
+                            "Salida": seg["departure_airport"]["time"],
+                            "Link": f"https://www.google.com/travel/flights?tfs={seg['arrival_airport']['id']}" # Link simple
+                        })
+                    # Formato Mapa (Explore)
                     elif "name" in v and "flight_cost" in v:
-                        item = {
+                        items.append({
                             "Destino": v["name"],
                             "Precio": f"{v['flight_cost']}€",
-                            "Aerolínea": "Varías",
-                            "Hora Salida": "Consultar",
+                            "Aerolínea": "Varios",
+                            "Salida": "Ver web",
                             "Link": "https://www.google.com/travel/flights"
-                        }
-                        tabla.append(item)
-                except:
-                    continue
-
-            if tabla:
-                st.success(f"✅ ¡Encontrados {len(tabla)} destinos!")
-                df = pd.DataFrame(tabla)
-                st.dataframe(
-                    df, 
-                    column_config={"Link": st.column_config.LinkColumn("Ver en Google")},
-                    use_container_width=True,
-                    hide_index=True
-                )
+                        })
+                except: pass
+            
+            if items:
+                st.success(f"✅ {len(items)} destinos encontrados")
+                st.dataframe(pd.DataFrame(items), use_container_width=True, hide_index=True)
