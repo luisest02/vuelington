@@ -1,152 +1,147 @@
 import os
 import requests
-from amadeus import Client, ResponseError
 from datetime import datetime, timedelta
 import time
 
-# --- CARGA DE SECRETOS ---
+# --- CONFIGURACIÓN ---
+# Consigue tu API Key en serpapi.com (Plan Free)
 try:
-    API_KEY = os.environ["AMADEUS_API_KEY"]
-    API_SECRET = os.environ["AMADEUS_API_SECRET"]
+    SERPAPI_KEY = os.environ["SERPAPI_KEY"] # ¡Crea este secreto en GitHub!
     TG_TOKEN = os.environ["TELEGRAM_TOKEN"]
     TG_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 except KeyError:
-    print("❌ Error: Faltan secretos en GitHub.")
+    print("❌ Faltan secretos (SERPAPI_KEY, TELEGRAM...).")
     exit()
 
-# --- CONFIGURACIÓN ---
 ORIGEN = "MAD"
-PRECIO_CHOLLO = 160 
-MESES_VISTA = 2 # Mantenemos 2 meses para permitir la doble búsqueda sin coste extra
-SEMANAS_A_MIRAR = MESES_VISTA * 4 
+DESTINO_GENERAL = "Europe" # Buscamos en todo el continente
+PRECIO_MAXIMO = 180       # Sube un poco, Google suele dar precios finales
+SEMANAS_A_MIRAR = 8       # Miramos 2 meses vista
 
-# 🌍 DICCIONARIO DE CIUDADES (Para mostrar nombres bonitos)
-NOMBRES_CIUDADES = {
-    "TIA": "Tirana", "OTP": "Bucarest", "CLJ": "Cluj", "ZAG": "Zagreb", 
-    "SOF": "Sofía", "KRK": "Cracovia", "WAW": "Varsovia", "BUD": "Budapest",
-    "PRG": "Praga", "BER": "Berlín", "AMS": "Ámsterdam", "DUB": "Dublín",
-    "BRU": "Bruselas", "MLA": "Malta", "ROM": "Roma", "MIL": "Milán",
-    "VCE": "Venecia", "NAP": "Nápoles", "BLQ": "Bolonia", "LON": "Londres", 
-    "PAR": "París"
-}
-
-# Lista de códigos para la búsqueda (extraída del diccionario)
-DESTINOS = list(NOMBRES_CIUDADES.keys())
+# --- FILTROS INTELIGENTES DE HORARIO ---
+# Formato SerpApi: "HHMM,HHMM" (Rango de horas)
+HORA_IDA = "1400,2359"    # Viernes a partir de las 14:00
+HORA_VUELTA = "1600,2359" # Domingo a partir de las 16:00 (para aprovechar el día)
 
 def enviar_telegram(msg):
-    # Cortamos si excede el límite de Telegram
-    if len(msg) > 4000:
-        msg = msg[:4000] + "\n...(cortado por longitud)"
-    
+    if not msg: return
+    if len(msg) > 4000: msg = msg[:4000] + "..."
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    # Importante: parse_mode='Markdown' permite los enlaces [Texto](URL)
     requests.post(url, data={"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "Markdown"})
 
-# --- LÓGICA PRINCIPAL ---
-try:
-    if "PENDIENTE" in API_KEY:
-        print("⏳ Claves PENDIENTE.")
-        exit()
-
-    # ⚠️ IMPORTANTE: CAMBIA 'test' POR 'production' CUANDO TENGAS LAS CLAVES REALES
-    amadeus = Client(client_id=API_KEY, client_secret=API_SECRET, hostname='test')
+def buscar_google_smart(fecha_ida, fecha_vuelta):
+    url = "https://serpapi.com/search"
     
-    ranking_global = []
-
-    # Calculamos el PRIMER viernes
-    hoy = datetime.now()
-    dias_viernes = (4 - hoy.weekday() + 7) % 7
-    if dias_viernes == 0: dias_viernes = 7
-    primer_viernes = hoy + timedelta(days=dias_viernes)
-
-    print(f"🔎 Buscando Eurotrips (V-D y S-D) a {MESES_VISTA} meses vista...")
-
-    # BUCLE DE FECHAS
-    for i in range(SEMANAS_A_MIRAR):
-        # Fechas base de esa semana
-        date_viernes = primer_viernes + timedelta(weeks=i)
-        date_sabado = date_viernes + timedelta(days=1)
-        date_domingo = date_viernes + timedelta(days=2)
+    params = {
+        "engine": "google_flights",
+        "departure_id": ORIGEN,
+        "arrival_id": DESTINO_GENERAL, # Truco: Buscamos a "Europa"
+        "outbound_date": fecha_ida,
+        "return_date": fecha_vuelta,
+        "currency": "EUR",
+        "hl": "es", # Idioma español para nombres de ciudades
+        "api_key": SERPAPI_KEY,
         
-        str_viernes = date_viernes.strftime('%Y-%m-%d')
-        str_sabado = date_sabado.strftime('%Y-%m-%d')
-        str_domingo = date_domingo.strftime('%Y-%m-%d')
+        # 🔥 AQUÍ ESTÁ LA MAGIA DEL FILTRO HORARIO
+        "outbound_times": HORA_IDA,   # Filtra la ida
+        "return_times": HORA_VUELTA,  # Filtra la vuelta
+        "stops": "0",                 # 0 = Solo directos (opcional, ahorra tiempo)
+        "type": "1"                   # 1 = Round Trip
+    }
+    
+    try:
+        # Esto consume 1 crédito de búsqueda
+        data = requests.get(url, params=params).json()
         
-        # DEFINIMOS LAS 2 BÚSQUEDAS POR SEMANA
-        opciones_busqueda = [
-            # Opción 1: Viernes Tarde -> Domingo (Cualquier hora vuelta)
-            {"ida": str_viernes, "vuelta": str_domingo, "tag": "V-D", "h_min": 14, "h_max": 23},
-            # Opción 2: Sábado Mañana -> Domingo Tarde (Estricto)
-            {"ida": str_sabado, "vuelta": str_domingo, "tag": "S-D", "h_min": 5, "h_max": 14}
-        ]
-
-        # BUCLE DE CIUDADES
-        for codigo in DESTINOS:
-            for opcion in opciones_busqueda:
-                try:
-                    res = amadeus.shopping.flight_offers_search.get(
-                        originLocationCode=ORIGEN, destinationLocationCode=codigo,
-                        departureDate=opcion["ida"], returnDate=opcion["vuelta"],
-                        adults=1, currencyCode='EUR', max=1 
-                    )
-                    
-                    if not res.data: continue
-                    vuelo = res.data[0] 
-
-                    # 1. Filtro Precio
-                    precio = float(vuelo['price']['total'])
-                    if precio > PRECIO_CHOLLO: continue
-
-                    segs_ida = vuelo['itineraries'][0]['segments']
-                    segs_vuelta = vuelo['itineraries'][1]['segments']
-                    
-                    # 2. Filtro Horario IDA
-                    h_salida = int(segs_ida[0]['departure']['at'].split('T')[1][:2])
-                    if not (opcion["h_min"] <= h_salida <= opcion["h_max"]): continue
-                    
-                    # 3. Filtro Horario VUELTA (Domingo)
-                    h_regreso = int(segs_vuelta[0]['departure']['at'].split('T')[1][:2])
-                    
-                    # Si es la opción Sábado-Domingo, exigimos volver tarde (>15:00)
-                    if opcion["tag"] == "S-D" and h_regreso < 15: continue
-                    
-                    # Preparar datos visuales
-                    h_ida_str = segs_ida[0]['departure']['at'].split('T')[1][:5]
-                    h_vuelta_str = segs_vuelta[0]['departure']['at'].split('T')[1][:5]
-                    aerolinea = segs_ida[0]['carrierCode']
-                    
-                    icono = "⚡" if opcion["tag"] == "S-D" else "📅" 
-                    fecha_bonita = f"{opcion['ida'][8:]}/{opcion['ida'][5:7]}"
-
-                    # --- GENERACIÓN DE LINK SKYSCANNER ---
-                    # Formato URL: AAMMDD (ej: 231027)
-                    sky_ida = opcion["ida"][2:].replace("-", "")
-                    sky_vuelta = opcion["vuelta"][2:].replace("-", "")
-                    url_sky = f"https://www.skyscanner.es/transport/flights/mad/{codigo.lower()}/{sky_ida}/{sky_vuelta}/"
-                    
-                    nombre_ciudad = NOMBRES_CIUDADES.get(codigo, codigo)
-
-                    ranking_global.append({
-                        'precio': precio,
-                        # Usamos Markdown para ocultar el link en el nombre de la ciudad
-                        'linea': f"{icono} [{nombre_ciudad}]({url_sky}) ({fecha_bonita}): **{precio}€** | {opcion['tag']} {h_ida_str}-{h_vuelta_str} ({aerolinea})"
-                    })
-                    
-                except Exception:
-                    continue
-
-    # --- ENVIAR RESUMEN ---
-    if ranking_global:
-        ranking_global.sort(key=lambda x: x['precio'])
+        # Google devuelve "price_graph" o "other_flights" en búsquedas generales.
+        # A veces, para "Europe", devuelve una lista de destinos en 'other_flights'
+        # o dentro de 'destinations' (depende de cómo responda Google ese día).
         
-        msg = f"🌍 **EUROTRIP FRIENDS** (Próx {MESES_VISTA} meses)\n_Top Chollos (V-D y S-D):_\n\n"
-        for item in ranking_global[:25]:
-            msg += item['linea'] + "\n"
+        resultados = []
         
-        enviar_telegram(msg)
-        print("✅ Resumen enviado.")
-    else:
-        print("🤷‍♂️ Nada interesante.")
+        # Estrategia: Google suele devolver "other_flights" con listas de destinos
+        vuelos = data.get("other_flights", [])
+        
+        # Si no hay vuelos directos en la lista principal, a veces da nada.
+        if not vuelos:
+             print(f"💨 Sin resultados para {fecha_ida}")
+             return []
 
-except Exception as e:
-    print(f"❌ Error: {e}")
+        for v in vuelos:
+            # Estructura típica de SerpApi Google Flights
+            try:
+                precio = v.get("price", 9999)
+                if precio > PRECIO_MAXIMO: continue
+                
+                # Extraer destino
+                destino = v["flights"][0]["arrival_airport"]["name"]
+                aerolinea = v["flights"][0]["airline"]
+                
+                # Horarios reales (Google ya ha filtrado, pero para mostrarlo)
+                # OJO: En vista "Explore" a veces resume la info.
+                h_salida = v["flights"][0]["departure_airport"]["time"]
+                h_regreso = v["flights"][-1]["departure_airport"]["time"]
+                
+                resultados.append({
+                    "destino": destino,
+                    "precio": precio,
+                    "aerolinea": aerolinea,
+                    "h_ida": h_salida,
+                    "h_vuelta": h_regreso
+                })
+            except:
+                continue
+                
+        return resultados
+
+    except Exception as e:
+        print(f"Error API: {e}")
+        return []
+
+# --- MAIN ---
+print(f"🚀 Iniciando barrido inteligente Google Flights ({SEMANAS_A_MIRAR} findes)...")
+reporte = []
+
+# Calculamos próximo Viernes
+hoy = datetime.now()
+dias_hasta_viernes = (4 - hoy.weekday() + 7) % 7
+if dias_hasta_viernes == 0: dias_hasta_viernes = 7
+primer_viernes = hoy + timedelta(days=dias_hasta_viernes)
+
+for i in range(SEMANAS_A_MIRAR):
+    # Fechas
+    viernes = primer_viernes + timedelta(weeks=i)
+    domingo = viernes + timedelta(days=2)
+    
+    s_viernes = viernes.strftime('%Y-%m-%d')
+    s_domingo = domingo.strftime('%Y-%m-%d')
+    fecha_humana = viernes.strftime('%d/%m')
+    
+    print(f"🔎 Mirando finde {fecha_humana}...")
+    
+    # 1 LLAMADA A LA API (Busca en toda Europa a la vez)
+    chollos = buscar_google_smart(s_viernes, s_domingo)
+    
+    if chollos:
+        # Ordenamos por precio
+        chollos.sort(key=lambda x: x['precio'])
+        
+        top_3 = chollos[:3] # Nos quedamos los 3 mejores de ese finde
+        
+        txt_finde = f"🗓️ **{fecha_humana}**:"
+        for c in top_3:
+            # Link para comprar
+            link = f"https://www.google.com/travel/flights?q=Flights%20to%20{c['destino']}%20on%20{s_viernes}%20through%20{s_domingo}"
+            txt_finde += f"\n✈️ [{c['destino']}]({link}) **{c['precio']}€** ({c['h_ida']}-{c['h_vuelta']})"
+        
+        reporte.append(txt_finde)
+    
+    # Pausa de seguridad (aunque SerpApi aguanta bien)
+    time.sleep(1)
+
+if reporte:
+    cuerpo = "\n\n".join(reporte)
+    enviar_telegram(f"⚡ **GOOGLE SNIPER ALERT** ⚡\n_Filtro: V({HORA_IDA.replace(',','-')}) - D({HORA_VUELTA.replace(',','-')})_\n\n{cuerpo}")
+    print("✅ Enviado.")
+else:
+    print("No se encontraron vuelos baratos en tus horarios.")
