@@ -41,9 +41,12 @@ with st.sidebar:
         h_ida = st.slider("Salida Viernes (desde)", 0, 23, 15, format="%dh")
         h_vuelta = st.slider("Vuelta Domingo (desde)", 0, 23, 16, format="%dh")
         
-        # Formato SerpApi: "HHmm,2359"
-        str_ida = f"{h_ida:02d}00,2359"
-        str_vuelta = f"{h_vuelta:02d}00,2359"
+        # CORRECCIÓN ERROR HORARIO:
+        # Google pide rango [0, 23]. Ej: "15,23" significa de las 15h a las 23h.
+        str_ida = f"{h_ida},23"
+        str_vuelta = f"{h_vuelta},23"
+        
+        st.caption(f"Filtro aplicado: {str_ida} / {str_vuelta}")
     
     st.divider()
     
@@ -74,7 +77,7 @@ def buscar_vuelos(origen, destino_id, f_ida, f_vuelta, precio_max, t_ida, t_vuel
         "type": "1"   # Ida y vuelta
     }
 
-    # CORRECCIÓN IMPORTANTE: Si es Mundo Entero, NO mandamos arrival_id
+    # CORRECCIÓN: Si es Mundo Entero, NO mandamos arrival_id
     if destino_id:
         params["arrival_id"] = destino_id
 
@@ -114,7 +117,7 @@ with c2: f_vuelta = st.date_input("Vuelta", datetime.now() + timedelta(days=7))
 with c3:
     region_txt = st.selectbox("Destino", ["Europa", "Mundo Entero"])
     
-    # ⚠️ AQUÍ ESTÁ EL FIX: CÓDIGOS REALES DE GOOGLE
+    # CORRECCIÓN ERROR DESTINO: Usamos IDs reales
     if region_txt == "Europa":
         region_code = "/m/02j9z" # Código interno de Google para Europa
     else:
@@ -145,7 +148,7 @@ if st.button("🔎 BUSCAR VUELOS", type="primary"):
                             "Precio": f"{v.get('price',0)}€",
                             "Aerolínea": seg["airline"],
                             "Salida": seg["departure_airport"]["time"],
-                            "Link": f"https://www.google.com/travel/flights?tfs={seg['arrival_airport']['id']}" # Link simple
+                            "Link": f"https://www.google.com/travel/flights?tfs={seg['arrival_airport']['id']}" 
                         })
                     # Formato Mapa (Explore)
                     elif "name" in v and "flight_cost" in v:
