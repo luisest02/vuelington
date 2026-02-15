@@ -5,45 +5,56 @@ from datetime import datetime, timedelta
 st.set_page_config(page_title="VUELINGTON PRO", page_icon="✈️", layout="wide")
 
 # ==========================================
-# 🔐 GESTIÓN DE SECRETOS
+# 🔐 GESTIÓN DE ESTADO (MEMORIA)
+# ==========================================
+# Esto soluciona el problema de que el botón de Telegram "no haga nada"
+if 'resultados' not in st.session_state:
+    st.session_state.resultados = []
+if 'msg_telegram' not in st.session_state:
+    st.session_state.msg_telegram = ""
+
+# ==========================================
+# 🔐 SECRETOS
 # ==========================================
 required_secrets = ["SERPAPI_KEY", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"]
 missing = [s for s in required_secrets if s not in st.secrets]
-
 if missing:
     st.error(f"🚨 FALTAN SECRETOS: {', '.join(missing)}")
-    st.info("Añádelos en Settings > Secrets")
     st.stop()
 
 API_KEY = st.secrets["SERPAPI_KEY"]
 TG_TOKEN = st.secrets["TELEGRAM_TOKEN"]
 TG_ID = st.secrets["TELEGRAM_CHAT_ID"]
 
-# Login (Opcional)
-if "PASSWORD_APP" in st.secrets:
-    if "auth" not in st.session_state: st.session_state.auth = False
-    if not st.session_state.auth:
-        pwd = st.text_input("🔑 Contraseña", type="password")
-        if pwd == st.secrets["PASSWORD_APP"]:
-            st.session_state.auth = True
-            st.rerun()
-        st.stop()
-
 # ==========================================
-# 📡 FUNCIONES (API Y TELEGRAM)
+# 📡 FUNCIONES
 # ==========================================
-def enviar_a_telegram(mensaje):
-    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    payload = {"chat_id": TG_ID, "text": mensaje, "parse_mode": "Markdown", "disable_web_page_preview": True}
+def get_saldo_api():
     try:
-        requests.post(url, data=payload)
-        st.toast("✅ Enviado a Telegram", icon="📱")
-    except Exception as e:
-        st.error(f"Error enviando a Telegram: {e}")
+        res = requests.get(f"https://serpapi.com/account?api_key={API_KEY}")
+        data = res.json()
+        return data.get("total_searches_left", "---")
+    except: return "Error"
 
-def buscar_vuelos(origen, region_code, f_ida, f_vuelta, precio_max_usuario, t_ida, t_vuelta):
+def enviar_telegram_debug(mensaje):
+    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TG_ID, 
+        "text": mensaje, 
+        "parse_mode": "Markdown", 
+        "disable_web_page_preview": True
+    }
+    try:
+        r = requests.post(url, data=payload)
+        if r.status_code == 200:
+            st.toast("✅ Mensaje enviado correctamente", icon="🚀")
+        else:
+            st.error(f"❌ Telegram rechazó el mensaje: {r.text}")
+    except Exception as e:
+        st.error(f"❌ Error de conexión con Telegram: {e}")
+
+def buscar_vuelos(origen, region_code, f_ida, f_vuelta, precio_max, t_ida, t_vuelta):
     url = "https://serpapi.com/search"
-    
     params = {
         "engine": "google_flights",
         "departure_id": origen,
@@ -57,160 +68,166 @@ def buscar_vuelos(origen, region_code, f_ida, f_vuelta, precio_max_usuario, t_id
         "outbound_times": t_ida,
         "return_times": t_vuelta
     }
-
-    # ID de destino (Europa o vacío para Mundo)
-    if region_code:
-        params["arrival_id"] = region_code
-
-    # Nota: No enviamos price_max a la API porque Google lo ignora a veces.
-    # Filtraremos nosotros manualmente después.
+    if region_code: params["arrival_id"] = region_code
 
     try:
         r = requests.get(url, params=params)
         data = r.json()
         
         if "error" in data:
-            st.error(f"❌ Google Error: {data['error']}")
+            st.error(f"Error API: {data['error']}")
             return []
             
-        # Unificamos fuentes de datos
-        raw_flights = data.get("other_flights", []) + data.get("destinations", [])
+        raw = data.get("other_flights", []) + data.get("destinations", [])
+        clean = []
         
-        vuelos_limpios = []
-        
-        for v in raw_flights:
+        for v in raw:
             try:
-                # Extracción de precio segura (quita el símbolo € y convierte a número)
-                precio_num = 9999
-                if "price" in v: precio_num = v["price"]
-                elif "flight_cost" in v: precio_num = v["flight_cost"]
+                # Extracción precio
+                p_val = 9999
+                if "price" in v: p_val = v["price"]
+                elif "flight_cost" in v: p_val = v["flight_cost"]
                 
-                # Gestión si el precio viene con texto (ej: "150€")
-                if isinstance(precio_num, str):
+                # Seguridad si viene como texto
+                if isinstance(p_val, str):
                     import re
-                    # Extraer solo dígitos
-                    nums = re.findall(r'\d+', precio_num)
-                    if nums: precio_num = int(nums[0])
+                    d = re.findall(r'\d+', p_val)
+                    if d: p_val = int(d[0])
                 
-                # 🔥 FILTRO ESTRICTO: Si pasa el presupuesto, ADIÓS.
-                if precio_num > precio_max_usuario:
-                    continue
+                if p_val > precio_max: continue
 
-                # Extracción de datos
+                # Datos
                 if "flights" in v:
                     seg = v["flights"][0]
-                    destino = seg["arrival_airport"]["name"]
-                    aerolinea = seg["airline"]
-                    hora = seg["departure_airport"]["time"]
-                    img = seg.get("airline_logo", None)
-                    link = f"https://www.google.com/travel/flights?tfs={seg['arrival_airport']['id']}"
+                    dest = seg["arrival_airport"]["name"]
+                    air = seg["airline"]
+                    time = seg["departure_airport"]["time"]
+                    # NUEVO LINK: Búsqueda directa en Google (Más fiable)
+                    link = f"https://www.google.com/travel/flights?q=Flights%20to%20{dest}%20from%20MAD%20on%20{f_ida}%20returning%20{f_vuelta}"
                 else:
-                    # Formato mapa
-                    destino = v.get("name", "Destino")
-                    aerolinea = "Varios"
-                    hora = "N/A"
-                    img = v.get("image", None)
-                    link = "https://www.google.com/travel/flights"
+                    dest = v.get("name", "Destino")
+                    air = "Varios"
+                    time = "N/A"
+                    link = f"https://www.google.com/travel/flights?q=Flights%20to%20{dest}%20from%20MAD%20on%20{f_ida}%20returning%20{f_vuelta}"
 
-                vuelos_limpios.append({
-                    "destino": destino,
-                    "precio": precio_num,
-                    "aerolinea": aerolinea,
-                    "hora": hora,
-                    "img": img,
-                    "link": link
+                clean.append({
+                    "destino": dest, "precio": p_val, 
+                    "aerolinea": air, "hora": time, "link": link
                 })
-
-            except Exception as e:
-                continue
-        
-        # Ordenar por precio (del más barato al más caro)
-        vuelos_limpios.sort(key=lambda x: x['precio'])
-        return vuelos_limpios
-
+            except: continue
+            
+        clean.sort(key=lambda x: x['precio'])
+        return clean
     except Exception as e:
-        st.error(f"Error de conexión: {e}")
+        st.error(f"Error Python: {e}")
         return []
 
 # ==========================================
-# 🖥️ INTERFAZ (UI MEJORADA)
+# 🖥️ SIDEBAR (CONTROL)
 # ==========================================
 with st.sidebar:
-    st.header("🎛️ Configuración")
+    st.header("📊 Estado API")
+    saldo = get_saldo_api()
+    if saldo != "Error":
+        st.metric("Llamadas Restantes", saldo)
+        if isinstance(saldo, int) and saldo < 10:
+            st.warning("⚠️ ¡Te quedan pocas!")
+    else:
+        st.error("Error conectando con SerpApi")
+
+    st.divider()
+    st.subheader("⚙️ Filtros")
+    h_ida = st.slider("Salida V (desde)", 0, 23, 15, format="%dh")
+    h_vuelta = st.slider("Vuelta D (desde)", 0, 23, 16, format="%dh")
     
-    # Filtros Horarios
-    st.subheader("🕒 Horarios (Finde)")
-    h_ida = st.slider("Salida Viernes (desde)", 0, 23, 15, format="%dh")
-    h_vuelta = st.slider("Vuelta Domingo (desde)", 0, 23, 16, format="%dh")
-    
+    # Formato SerpApi
     str_ida = f"{h_ida},23"
     str_vuelta = f"{h_vuelta},23"
-    
-    st.info(f"Filtro: Viernes {h_ida}:00+ | Domingo {h_vuelta}:00+")
-    
-    st.divider()
-    if st.button("Verificar Saldo API"):
-        try:
-            res = requests.get(f"https://serpapi.com/account?api_key={API_KEY}").json()
-            st.metric("Búsquedas restantes", res.get("total_searches_left", "Error"))
-        except: st.error("Error")
 
+# ==========================================
+# 🚀 INTERFAZ PRINCIPAL
+# ==========================================
 st.title("✈️ VUELINGTON PRO")
-st.markdown("### Buscador de Chollos Manual")
 
-# Layout de Búsqueda
+# --- LÓGICA DE FECHAS AUTOMÁTICAS ---
+col_auto, col_man = st.columns([1, 3])
+
+# Botón Mes Siguiente
+if col_auto.button("📅 Buscar Mes Siguiente (+30d)", type="primary"):
+    # Calcular fechas
+    hoy = datetime.now()
+    futuro = hoy + timedelta(days=30)
+    # Ajustar al siguiente viernes
+    dias_para_viernes = (4 - futuro.weekday() + 7) % 7
+    v_futuro = futuro + timedelta(days=dias_para_viernes)
+    d_futuro = v_futuro + timedelta(days=2)
+    
+    st.session_state.f_ida_default = v_futuro
+    st.session_state.f_vuelta_default = d_futuro
+    st.session_state.trigger_search = True # Gatillo para buscar
+else:
+    st.session_state.trigger_search = False
+
+# Valores por defecto de los inputs
+def_ida = st.session_state.get('f_ida_default', datetime.now() + timedelta(days=7))
+def_vuelta = st.session_state.get('f_vuelta_default', datetime.now() + timedelta(days=9))
+
+# Inputs Manuales
 c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
-with c1: f_ida = st.date_input("Ida", datetime.now() + timedelta(days=5))
-with c2: f_vuelta = st.date_input("Vuelta", datetime.now() + timedelta(days=7))
-with c3:
-    region = st.selectbox("Destino", ["Europa", "Mundo Entero"])
-    region_code = "/m/02j9z" if region == "Europa" else ""
-with c4:
-    presupuesto = st.number_input("Max €", 50, 1000, 150, step=10)
+with c1: f_ida_in = st.date_input("Ida", def_ida)
+with c2: f_vuelta_in = st.date_input("Vuelta", def_vuelta)
+with c3: region = st.selectbox("Destino", ["Europa", "Mundo Entero"])
+with c4: presu = st.number_input("Max €", 50, 1000, 150, step=10)
 
-if st.button("🔎 BUSCAR VUELOS", type="primary", use_container_width=True):
-    with st.spinner("Escaneando cielos..."):
-        resultados = buscar_vuelos(
-            "MAD", region_code, 
-            f_ida.strftime('%Y-%m-%d'), 
-            f_vuelta.strftime('%Y-%m-%d'), 
-            presupuesto, str_ida, str_vuelta
+# Gatillo de búsqueda (Manual o Automático)
+if st.button("🔎 BUSCAR AHORA") or st.session_state.trigger_search:
+    
+    region_code = "/m/02j9z" if region == "Europa" else ""
+    s_ida = f_ida_in.strftime('%Y-%m-%d')
+    s_vuelta = f_vuelta_in.strftime('%Y-%m-%d')
+    
+    with st.spinner(f"Buscando para {s_ida}..."):
+        # GUARDAMOS EN SESSION_STATE PARA QUE NO SE BORRE AL USAR TELEGRAM
+        st.session_state.resultados = buscar_vuelos(
+            "MAD", region_code, s_ida, s_vuelta, presu, str_ida, str_vuelta
         )
         
-        if not resultados:
-            st.warning(f"🚫 No hay vuelos a {region} por menos de {presupuesto}€ con esos horarios.")
+        # Preparamos mensaje de Telegram
+        if st.session_state.resultados:
+            msg = f"🚀 **VUELINGTON MANUAL**\n📅 {f_ida_in.strftime('%d/%b')} - {f_vuelta_in.strftime('%d/%b')}\n\n"
+            for v in st.session_state.resultados[:10]:
+                msg += f"✈️ {v['destino']}: **{v['precio']}€**\n🔗 [Ver en Google]({v['link']})\n\n"
+            st.session_state.msg_telegram = msg
         else:
-            st.balloons()
-            
-            # --- ZONA DE RESULTADOS ---
-            st.success(f"✅ ¡Encontrados {len(resultados)} chollos!")
-            
-            # Botón para enviar TODO a Telegram
-            msg_tg = f"🚀 **RESULTADOS MANUALES**\n📅 {f_ida.strftime('%d/%m')} - {f_vuelta.strftime('%d/%m')}\n\n"
-            for v in resultados[:10]: # Top 10 para no saturar
-                msg_tg += f"✈️ {v['destino']}: **{v['precio']}€** ({v['aerolinea']})\n🔗 [Ver Vuelo]({v['link']})\n\n"
-            
-            if st.button("📱 Enviar Top 10 a Telegram"):
-                enviar_a_telegram(msg_tg)
-            
+            st.session_state.msg_telegram = ""
+
+# ==========================================
+# 📝 MOSTRAR RESULTADOS (DESDE MEMORIA)
+# ==========================================
+if st.session_state.resultados:
+    st.success(f"✅ {len(st.session_state.resultados)} vuelos encontrados")
+    
+    # Botón Telegram (Ahora funciona porque lee de memoria)
+    if st.button("📱 Enviar Resultados a Telegram"):
+        if st.session_state.msg_telegram:
+            enviar_telegram_debug(st.session_state.msg_telegram)
+        else:
+            st.warning("No hay mensaje para enviar.")
+
+    st.divider()
+    
+    # Renderizar Tarjetas
+    for v in st.session_state.resultados:
+        with st.container():
+            k1, k2, k3 = st.columns([3, 2, 2])
+            with k1:
+                st.markdown(f"### {v['destino']}")
+                st.caption(f"{v['aerolinea']} | {v['hora']}")
+            with k2:
+                st.markdown(f"### {v['precio']}€")
+            with k3:
+                st.link_button("Ver en Google Flights", v['link'])
             st.divider()
 
-            # --- VISUALIZACIÓN EN TARJETAS ---
-            for i, vuelo in enumerate(resultados):
-                with st.container():
-                    col_img, col_datos, col_precio = st.columns([1, 4, 2])
-                    
-                    with col_img:
-                        # Si hay logo lo ponemos, si no un emoji
-                        if vuelo['img']: st.image(vuelo['img'], width=50)
-                        else: st.markdown("✈️")
-                    
-                    with col_datos:
-                        st.markdown(f"**{vuelo['destino']}**")
-                        st.caption(f"{vuelo['aerolinea']} | Salida: {vuelo['hora']}")
-                    
-                    with col_precio:
-                        st.markdown(f"### {vuelo['precio']}€")
-                        st.link_button("Comprar", vuelo['link'])
-                    
-                    st.divider()
+elif st.session_state.get('trigger_search') == False and st.button("Limpiar Resultados"):
+    st.session_state.resultados = []
