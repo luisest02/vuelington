@@ -1,9 +1,9 @@
-name: Bot Vuelos
+name: Bot Vuelos Semanal
 on:
   schedule:
-    # Se ejecuta a las 05:00 AM UTC los Martes (2)
-    - cron: '0 5 * * 2'
-  workflow_dispatch: # Esto habilita el botón manual para probarlo
+    # Minuto 0, Hora 3, Cualquier día mes, Cualquier mes, Día semana 2 (Martes)
+    - cron: '0 3 * * 2'
+  workflow_dispatch: # Botón manual para pruebas
 
 jobs:
   run:
@@ -14,8 +14,8 @@ jobs:
         with:
           python-version: '3.10'
       - name: Instalar librerías
-        run: pip install -r requirements.txt
-      - name: Ejecutar Bot de Alerta
+        run: pip install requests
+      - name: Ejecutar Alerta
         env:
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
