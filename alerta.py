@@ -4,9 +4,9 @@ from datetime import datetime, timedelta
 import time
 import re
 
-# --- CONFIGURACIÓN ---
-SEMANAS_A_MIRAR = 13
-PRECIO_MAXIMO = 200
+# --- CONFIGURACIÓN OPTIMIZADA ---
+SEMANAS_A_MIRAR = 6  # 📉 REDUCIDO: Miramos a mes y medio vista para AHORRAR TOKENS
+PRECIO_MAXIMO = 150  # Ajusta tu presupuesto máximo
 DESTINO_BOT = "/m/02j9z" # Europa
 
 try:
@@ -19,7 +19,9 @@ except KeyError:
 
 def enviar_telegram(msg):
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "Markdown", "disable_web_page_preview": True})
+    # 🟢 CORRECCIÓN: Enviamos como 'json' para que Telegram no falle
+    payload = {"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "Markdown", "disable_web_page_preview": True}
+    requests.post(url, json=payload, timeout=10)
 
 def buscar_vuelos_google(f_ida, f_vuelta):
     url = "https://serpapi.com/search"
@@ -33,9 +35,10 @@ def buscar_vuelos_google(f_ida, f_vuelta):
         "hl": "es",
         "api_key": SERPAPI_KEY,
         "stops": "0",
+        "type": "1",               # 🔒 FUERZA IDA Y VUELTA: Siempre vuelve a MAD
         "price_max": PRECIO_MAXIMO,
-        "outbound_times": "15,23", # Viernes tarde
-        "return_times": "16,23"    # Domingo tarde
+        "outbound_times": "05,12", # 🌅 SÁBADO: Salidas solo de 05:00 a 12:00
+        "return_times": "16,23"    # 🌇 DOMINGO: Regresos solo de 16:00 a 23:59
     }
 
     try:
@@ -46,7 +49,6 @@ def buscar_vuelos_google(f_ida, f_vuelta):
             print(f"⚠️ Error API Google: {data['error']}")
             return []
             
-        # MEJORA: Combinar listas como en la app manual
         raw = data.get("best_flights", []) + data.get("other_flights", []) + data.get("destinations", [])
         
         clean = []
@@ -70,13 +72,14 @@ def buscar_vuelos_google(f_ida, f_vuelta):
                 else:
                     dest = v.get("name", "Destino")
 
-                # 3. Link
+                # 3. Link Robusto
                 link = f"https://www.google.com/travel/flights?q=Flights%20to%20{dest}%20from%20MAD%20on%20{f_ida}%20returning%20{f_vuelta}"
 
                 clean.append({"destino": dest, "precio": p_val, "link": link})
             except Exception:
                 continue
 
+        # Ordenar de más barato a más caro
         clean.sort(key=lambda x: x['precio'])
         return clean
 
@@ -84,26 +87,27 @@ def buscar_vuelos_google(f_ida, f_vuelta):
         print(f"❌ Error Excepción: {e}")
         return []
 
-# --- EJECUCIÓN ---
-print("🚀 Iniciando escaneo semanal...")
+# --- EJECUCIÓN (Lógica de Sábado a Domingo) ---
+print("🚀 Iniciando escaneo de escapadas (Sab-Dom)...")
 reporte = []
 
 hoy = datetime.now()
-dias_viernes = (4 - hoy.weekday() + 7) % 7
-if dias_viernes == 0: dias_viernes = 7
-primer_viernes = hoy + timedelta(days=dias_viernes)
+# 📅 LÓGICA: Encontrar el próximo SÁBADO (Día 5 de la semana en Python)
+dias_sabado = (5 - hoy.weekday() + 7) % 7
+if dias_sabado == 0: dias_sabado = 7 # Si hoy es sábado, miramos el de la semana que viene
+primer_sabado = hoy + timedelta(days=dias_sabado)
 
 for i in range(SEMANAS_A_MIRAR):
-    v = primer_viernes + timedelta(weeks=i)
-    d = v + timedelta(days=2)
+    v = primer_sabado + timedelta(weeks=i)
+    d = v + timedelta(days=1) # 📅 LÓGICA: Sumamos 1 solo día para volver el DOMINGO
     s_v, s_d = v.strftime('%Y-%m-%d'), d.strftime('%Y-%m-%d')
     
-    print(f"🔎 Escaneando finde {s_v}...")
+    print(f"🔎 Escaneando finde exprés {s_v}...")
     vuelos = buscar_vuelos_google(s_v, s_d)
     
     if vuelos:
         top = vuelos[:3] # Top 3 más baratos por fin de semana
-        txt = f"🗓️ **{v.strftime('%d/%b')}**"
+        txt = f"🗓️ **{v.strftime('%d/%b')} al {d.strftime('%d/%b')}**"
         for x in top:
             txt += f"\n✈️ [{x['destino']}]({x['link']}) **{x['precio']}€**"
         reporte.append(txt)
@@ -112,7 +116,7 @@ for i in range(SEMANAS_A_MIRAR):
 
 if reporte:
     msg = "\n\n".join(reporte)
-    enviar_telegram(f"🌍 **RESUMEN VUELOS (V-D Tarde)**\n\n{msg}")
+    enviar_telegram(f"🌍 **CHOLLOS 1 DÍA (Sab Mañana - Dom Tarde)**\n\n{msg}")
     print("✅ Reporte enviado a Telegram.")
 else:
     print("⚠️ Nada encontrado por debajo del precio máximo.")
